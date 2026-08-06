@@ -1,0 +1,96 @@
+* {
+    font-family: "Segoe UI";
+    font-size: 10pt;
+    color: #26343B;
+}
+QMainWindow, QWidget#contentRoot {
+    background: #F4F7F8;
+}
+QFrame#sidebar {
+    background: #163F4D;
+    border: none;
+}
+QLabel#brand {
+    color: white;
+    font-size: 16pt;
+    font-weight: 700;
+    padding: 8px 12px 20px 12px;
+}
+QPushButton#navButton {
+    color: #DCE9ED;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    text-align: left;
+    padding: 11px 14px;
+}
+QPushButton#navButton:hover { background: #215568; }
+QPushButton#navButton:checked {
+    color: white;
+    background: #2A6B7F;
+    font-weight: 600;
+}
+QFrame#topbar, QFrame#card {
+    background: white;
+    border: 1px solid #DDE5E8;
+    border-radius: 8px;
+}
+QLabel#pageTitle { font-size: 17pt; font-weight: 700; color: #183B47; }
+QLabel#sectionTitle { font-size: 12pt; font-weight: 650; color: #244B58; }
+QLabel#sensorValue { font-size: 27pt; font-weight: 700; color: #143F4C; }
+QLabel#sensorUnit { color: #60757D; font-size: 11pt; }
+QLabel#muted { color: #72868D; }
+QLabel#pillGood {
+    color: #177245; background: #E2F5EA; border-radius: 9px; padding: 3px 8px;
+}
+QLabel#pillWarn {
+    color: #8A6100; background: #FFF2C9; border-radius: 9px; padding: 3px 8px;
+}
+QLabel#pillBad {
+    color: #A43131; background: #FBE4E4; border-radius: 9px; padding: 3px 8px;
+}
+QLabel#pillNeutral {
+    color: #536870; background: #E9EEF0; border-radius: 9px; padding: 3px 8px;
+}
+QLabel#simulationBanner {
+    color: #764C00; background: #FFE8A3; border: 1px solid #F1C75B;
+    border-radius: 5px; padding: 7px; font-weight: 700;
+}
+QPushButton {
+    background: white; border: 1px solid #BFCED3; border-radius: 6px;
+    min-height: 22px;
+    padding: 7px 13px 8px 13px;
+}
+QPushButton:hover { border-color: #2A7187; color: #1D6176; }
+QPushButton:disabled { color: #9EABAF; background: #EEF2F3; }
+QPushButton#primary {
+    background: #1F6C83; color: white; border-color: #1F6C83; font-weight: 600;
+}
+QPushButton#primary:hover { background: #195A6D; }
+QPushButton#danger { color: #9E3030; border-color: #DDAAAA; }
+QLineEdit, QTextEdit, QPlainTextEdit, QComboBox, QSpinBox, QDoubleSpinBox, QDateEdit {
+    background: white; border: 1px solid #C8D5D9; border-radius: 5px; padding: 6px;
+    selection-background-color: #4A889A;
+}
+QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QDateEdit {
+    min-height: 20px;
+}
+QDialogButtonBox QPushButton {
+    min-height: 24px;
+    min-width: 92px;
+}
+QTableWidget, QTableView {
+    background: white; alternate-background-color: #F7F9FA;
+    border: 1px solid #DDE5E8; border-radius: 6px; gridline-color: #E7ECEE;
+}
+QHeaderView::section {
+    background: #EAF0F2; color: #36535D; padding: 7px;
+    border: none; border-right: 1px solid #D5E0E3; font-weight: 600;
+}
+QTabWidget::pane { border: 1px solid #DDE5E8; background: white; }
+QTabBar::tab { padding: 8px 13px; background: #EAF0F2; }
+QTabBar::tab:selected { background: white; color: #1F6C83; font-weight: 600; }
+QProgressBar {
+    border: none; background: #E9EFF1; height: 7px; border-radius: 3px;
+}
+QProgressBar::chunk { background: #2C8794; border-radius: 3px; }

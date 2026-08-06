@@ -1,0 +1,1 @@
+"""Comunicação serial e simulação."""
