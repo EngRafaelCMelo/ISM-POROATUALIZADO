@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+build/
+dist/
+
+data/*.db
+data/*.db-*
+data/backups/
+logs/*.log*
+exports/*
+!exports/.gitkeep
+config/user_config.json
+pyinstaller-*.log
+data/*
+!data/.gitkeep

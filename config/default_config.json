@@ -1,0 +1,92 @@
+{
+  "aplicacao": {
+    "nome": "Supervisor de Porosímetro",
+    "versao": "1.1.1",
+    "equipamento": "Porosímetro ISM",
+    "usuario": "Operador"
+  },
+  "comunicacao": {
+    "porta": "",
+    "baud_rate": 115200,
+    "timeout_s": 3.0,
+    "reconexao_automatica": true,
+    "intervalo_s": 1.0
+  },
+  "aquisicao": {
+    "fonte_valor": "comparar",
+    "intervalo_s": 1.0,
+    "limite_pontos": 3600
+  },
+  "sensores": {
+    "pressao": {
+      "nome": "Pressão",
+      "unidade": "bar",
+      "corrente_min": 4.0,
+      "corrente_max": 20.0,
+      "limite_inferior": 0.0,
+      "limite_superior": 10.0,
+      "ganho": 1.0,
+      "offset": 0.0,
+      "casas": 2,
+      "tolerancia": 0.15,
+      "alerta": 9.0,
+      "critico": 10.0
+    },
+    "vazao_baixa": {
+      "nome": "Vazão baixa",
+      "unidade": "L/min",
+      "corrente_min": 4.0,
+      "corrente_max": 20.0,
+      "limite_inferior": 0.0,
+      "limite_superior": 5.0,
+      "ganho": 1.0,
+      "offset": 0.0,
+      "casas": 2,
+      "tolerancia": 0.15,
+      "alerta": 4.5,
+      "critico": 5.0
+    },
+    "vazao_alta": {
+      "nome": "Vazão alta",
+      "unidade": "L/min",
+      "corrente_min": 4.0,
+      "corrente_max": 20.0,
+      "limite_inferior": 0.0,
+      "limite_superior": 50.0,
+      "ganho": 1.0,
+      "offset": 0.0,
+      "casas": 2,
+      "tolerancia": 0.5,
+      "alerta": 45.0,
+      "critico": 50.0
+    }
+  },
+  "flow_meter": {
+    "modo": "automatico",
+    "trocar_alta_percentual": 90.0,
+    "retornar_baixa_percentual": 75.0
+  },
+  "calculos": {
+    "volume_camara_amostra_cm3": 50.0,
+    "volume_expansao_cm3": 25.0,
+    "pressao_atmosferica_kpa": 101.325,
+    "limite_repetibilidade_percentual": 0.5,
+    "gas_padrao": "Helio"
+  },
+  "simulacao": {
+    "ruido": 0.03,
+    "intervalo_s": 1.0
+  },
+  "interface": {
+    "tema": "claro",
+    "fonte": 10,
+    "janela_grafico_s": 60
+  },
+  "dados": {
+    "banco": "",
+    "diretorio_exportacao": "",
+    "separador_csv": ";",
+    "backup_automatico": true,
+    "retencao_logs_dias": 30
+  }
+}
