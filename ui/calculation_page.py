@@ -330,7 +330,7 @@ class CalculationPage(QWidget):
         self.current_pressure.setText(
             f"Pressão atual: {value:.5f} {self.pressure_unit.currentText()}" if value is not None else "Pressão atual: —"
         )
-        flow_reading = measurement.high_flow if measurement.active_flow_meter == "alta" else measurement.low_flow
+        flow_reading = measurement.flow
         self.current_flow.setText(
             f"Vazão ativa: {flow_reading.value:.5f} L/min" if flow_reading.value is not None else "Vazão ativa: —"
         )
@@ -342,11 +342,7 @@ class CalculationPage(QWidget):
     def _capture_flow(self) -> None:
         if not self.current_measurement:
             return
-        reading = (
-            self.current_measurement.high_flow
-            if self.current_measurement.active_flow_meter == "alta"
-            else self.current_measurement.low_flow
-        )
+        reading = self.current_measurement.flow
         if reading.value is not None:
             self.flow.setValue(reading.value)
 

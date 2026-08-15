@@ -26,9 +26,5 @@ class TestStatus(StrEnum):
     INVALID = "inválido"
 
 
-SENSOR_KEYS = ("pressao", "vazao_baixa", "vazao_alta")
-SENSOR_MA_KEYS = {
-    "pressao": "pressao_ma",
-    "vazao_baixa": "vazao_baixa_ma",
-    "vazao_alta": "vazao_alta_ma",
-}
+SENSOR_KEYS = ("pressao", "vazao")
+SERIAL_SCHEMA_VERSION = 1

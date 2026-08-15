@@ -22,8 +22,7 @@ def test_export_csv(tmp_path) -> None:
         Measurement(
             datetime.now(),
             pressure=SensorReading(2, 7.2, ReadingQuality.VALID),
-            low_flow=SensorReading(1, 7.2, ReadingQuality.VALID),
-            high_flow=SensorReading(10, 7.2, ReadingQuality.VALID),
+            flow=SensorReading(value=10, quality=ReadingQuality.VALID, valid=True),
         ),
     )
     target = ExportService(tests, events).export_csv(session.id, tmp_path / "exports")
@@ -44,8 +43,7 @@ def test_export_xlsx_json_and_pdf(tmp_path) -> None:
         Measurement(
             datetime.now(),
             pressure=SensorReading(4, 10.4, ReadingQuality.VALID),
-            low_flow=SensorReading(2, 10.4, ReadingQuality.VALID),
-            high_flow=SensorReading(20, 10.4, ReadingQuality.VALID),
+            flow=SensorReading(value=20, quality=ReadingQuality.VALID, valid=True),
         ),
     )
     tests.finish(session.id, "Ensaio de validação")

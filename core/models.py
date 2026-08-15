@@ -14,6 +14,9 @@ class SensorReading:
     quality: ReadingQuality = ReadingQuality.MISSING
     device_value: float | None = None
     calculated_value: float | None = None
+    unit: str = ""
+    valid: bool = False
+    raw_value: float | int | None = None
 
 
 @dataclass(slots=True)
@@ -21,18 +24,20 @@ class Measurement:
     received_at: datetime
     device_timestamp_ms: int | None = None
     pressure: SensorReading = field(default_factory=SensorReading)
-    low_flow: SensorReading = field(default_factory=SensorReading)
-    high_flow: SensorReading = field(default_factory=SensorReading)
-    active_flow_meter: str = "baixa"
+    flow: SensorReading = field(default_factory=SensorReading)
     communication_state: str = "conectado"
     raw_message: str = ""
     simulated: bool = False
+    schema_version: int = 1
+    sequence: int | None = None
+    uptime_ms: int | None = None
+    alarms: tuple[str, ...] = ()
+    firmware_version: str = ""
 
     def to_db_tuple(self, test_id: int) -> tuple[Any, ...]:
         qualities = {
             self.pressure.quality.value,
-            self.low_flow.quality.value,
-            self.high_flow.quality.value,
+            self.flow.quality.value,
         }
         overall = (
             ReadingQuality.INVALID.value
@@ -46,14 +51,20 @@ class Measurement:
         return (
             test_id,
             self.received_at.isoformat(timespec="milliseconds"),
-            self.device_timestamp_ms,
+            self.uptime_ms if self.uptime_ms is not None else self.device_timestamp_ms,
             self.pressure.current_ma,
             self.pressure.value,
-            self.low_flow.current_ma,
-            self.low_flow.value,
-            self.high_flow.current_ma,
-            self.high_flow.value,
-            self.active_flow_meter,
+            self.pressure.raw_value,
+            self.pressure.unit,
+            int(self.pressure.valid),
+            self.flow.raw_value,
+            self.flow.value,
+            self.flow.unit,
+            int(self.flow.valid),
+            self.sequence,
+            self.schema_version,
+            self.firmware_version,
+            int(self.simulated),
             overall,
             self.communication_state,
             self.raw_message,
@@ -70,7 +81,6 @@ class TestDefinition:
     test_type: str = "Porosimetria"
     notes: str = ""
     expected_pressure_range: str = ""
-    primary_flow_meter: str = "Automático"
     pressure_unit: str = "bar"
     flow_unit: str = "L/min"
     acquisition_interval: float = 1.0
@@ -83,6 +93,9 @@ class TestDefinition:
     temperature_c: float = 20.0
     atmospheric_pressure_kpa: float = 101.325
     pressure_reference: str = "manometrica"
+    configuration_snapshot: str = ""
+    firmware_version: str = ""
+    simulated: bool = False
 
 
 @dataclass(slots=True)

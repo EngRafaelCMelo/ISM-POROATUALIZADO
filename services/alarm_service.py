@@ -21,8 +21,7 @@ class AlarmService:
         alarms: list[Alarm] = []
         mapping = {
             "pressao": measurement.pressure,
-            "vazao_baixa": measurement.low_flow,
-            "vazao_alta": measurement.high_flow,
+            "vazao": measurement.flow,
         }
         for sensor, reading in mapping.items():
             alarms.extend(self._sensor_alarms(sensor, reading, measurement.received_at))
@@ -57,14 +56,15 @@ class AlarmService:
         if value is None:
             return alarms
         cfg = self.config[sensor]
-        if value < float(cfg["limite_inferior"]) or value > float(cfg["limite_superior"]):
-            limit = cfg["limite_inferior"] if value < cfg["limite_inferior"] else cfg["limite_superior"]
+        lower, upper = cfg.get("limite_inferior"), cfg.get("limite_superior")
+        if lower is not None and value < float(lower) or upper is not None and value > float(upper):
+            limit = lower if lower is not None and value < float(lower) else upper
             alarms.append(Alarm(timestamp, label, Severity.ALARM, "faixa",
                                 "Valor fora da faixa configurada", value, float(limit)))
-        elif value >= float(cfg.get("critico", cfg["limite_superior"])):
+        elif cfg.get("critico") is not None and value >= float(cfg["critico"]):
             alarms.append(Alarm(timestamp, label, Severity.CRITICAL, "processo",
                                 "Limite crítico atingido", value, float(cfg["critico"])))
-        elif value >= float(cfg.get("alerta", cfg["limite_superior"])):
+        elif cfg.get("alerta") is not None and value >= float(cfg["alerta"]):
             alarms.append(Alarm(timestamp, label, Severity.WARNING, "processo",
                                 "Limite de atenção atingido", value, float(cfg["alerta"])))
 

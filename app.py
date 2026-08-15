@@ -3,14 +3,17 @@ from __future__ import annotations
 
 import logging
 import sys
+import ctypes
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtGui import QIcon, QPixmap
+from PySide6.QtWidgets import QApplication, QMessageBox, QSplashScreen
 
 from config.settings import AppPaths, ConfigManager
 from database.database import Database
 from ui.main_window import MainWindow
+from ui.resources import branding_path
 
 
 def configure_logging(paths: AppPaths) -> None:
@@ -36,6 +39,24 @@ def main() -> int:
     app.setApplicationName("Supervisor de Porosímetro")
     app.setOrganizationName("ISM")
     app.setAttribute(Qt.ApplicationAttribute.AA_DontUseNativeMenuBar)
+    if sys.platform == "win32":
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("ISM.Porosimetro.Supervisor.2")
+        except (AttributeError, OSError):
+            logging.warning("Não foi possível definir AppUserModelID")
+    app_icon = QIcon(str(branding_path("ism_app_icon.ico")))
+    app.setWindowIcon(app_icon)
+    splash_pixmap = QPixmap(str(branding_path("ism_logo_horizontal.png"))).scaled(
+        620, 220, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
+    )
+    splash = QSplashScreen(splash_pixmap)
+    splash.setWindowIcon(app_icon)
+    splash.showMessage(
+        "Sistema Supervisório do Porosímetro · inicializando…",
+        Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignHCenter,
+        Qt.GlobalColor.darkBlue,
+    )
+    splash.show(); app.processEvents()
 
     try:
         config = ConfigManager(paths)
@@ -47,7 +68,9 @@ def main() -> int:
         database = Database(config.database_path)
         database.initialize()
         window = MainWindow(config, database, paths)
+        window.setWindowIcon(app_icon)
         window.show()
+        splash.finish(window)
         return app.exec()
     except Exception as exc:  # proteção da borda da aplicação
         logging.exception("Falha fatal ao iniciar a aplicação")

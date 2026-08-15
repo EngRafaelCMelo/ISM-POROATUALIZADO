@@ -29,25 +29,6 @@ def range_percent(value: float | None, lower: float, upper: float) -> float | No
     return max(0.0, min(100.0, (value - lower) * 100.0 / (upper - lower)))
 
 
-class FlowMeterSelector:
-    def __init__(self, switch_high: float = 90.0, return_low: float = 75.0):
-        if return_low >= switch_high:
-            raise ValueError("A histerese requer retorno menor que o limite de troca")
-        self.switch_high = switch_high
-        self.return_low = return_low
-        self.active = "baixa"
-
-    def select(self, low_value: float | None, low_min: float, low_max: float) -> str:
-        percent = range_percent(low_value, low_min, low_max)
-        if percent is None:
-            return self.active
-        if self.active == "baixa" and percent >= self.switch_high:
-            self.active = "alta"
-        elif self.active == "alta" and percent <= self.return_low:
-            self.active = "baixa"
-        return self.active
-
-
 @dataclass(frozen=True)
 class Statistics:
     current: float | None = None

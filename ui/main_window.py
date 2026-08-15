@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import json
 import os
 import shutil
 from collections import deque
@@ -9,8 +10,8 @@ from pathlib import Path
 from typing import Any
 
 import pyqtgraph as pg
-from PySide6.QtCore import QTimer, Qt
-from PySide6.QtGui import QAction, QCloseEvent
+from PySide6.QtCore import QSize, QTimer, Qt
+from PySide6.QtGui import QAction, QCloseEvent, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -44,8 +45,10 @@ from services.export_service import ExportService
 from services.test_service import TestService
 from ui.dialogs.marker_dialog import MarkerDialog
 from ui.dialogs.test_dialog import TestSetupDialog
+from ui.workers import ExportWorker
 from ui.calculation_page import CalculationPage
 from ui.pages import (
+    AboutPage,
     CalibrationPage,
     DiagnosticsPage,
     GraphsPage,
@@ -54,6 +57,9 @@ from ui.pages import (
     SettingsPage,
     TestPage,
 )
+from ui.theme import COLORS, icon_path
+from ui.resources import branding_path
+from ui.widgets.components import StatusBadge
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +81,7 @@ class MainWindow(QMainWindow):
         self.simulator: SimulatorWorker | None = None
         self.connected = False
         self.simulating = False
+        self.export_workers: set[ExportWorker] = set()
         self.message_times: deque[datetime] = deque(maxlen=20)
         self.calculation_test_id: int | None = None
 
@@ -89,7 +96,7 @@ class MainWindow(QMainWindow):
         self._setup_timers()
         self.setWindowTitle("Supervisor de Porosímetro")
         self.resize(1500, 920)
-        self.setMinimumSize(1160, 720)
+        self.setMinimumSize(1180, 700)
 
     def _build_ui(self) -> None:
         root = QWidget()
@@ -101,55 +108,83 @@ class MainWindow(QMainWindow):
 
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(205)
+        sidebar.setFixedWidth(224)
         side_layout = QVBoxLayout(sidebar)
         side_layout.setContentsMargins(11, 17, 11, 17)
-        brand = QLabel("ISM\nPOROSÍMETRO")
-        brand.setObjectName("brand")
+        brand = QLabel()
+        brand.setObjectName("brandLogo")
+        brand.setPixmap(QPixmap(str(branding_path("ism_simbolo_transparente.png"))).scaled(
+            82, 58, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
+        ))
+        brand.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        brand_name = QLabel("POROSÍMETRO SUPERVISÓRIO")
+        brand_name.setObjectName("brandName")
         side_layout.addWidget(brand)
+        side_layout.addWidget(brand_name)
+        side_layout.addSpacing(16)
+        section = QLabel("OPERAÇÃO")
+        section.setObjectName("sidebarCaption")
+        side_layout.addWidget(section)
         self.nav_buttons: list[QPushButton] = []
+        self.nav_by_page: dict[int, QPushButton] = {}
         nav_items = [
-            "Visão geral", "Ensaio", "Cálculos", "Gráficos", "Histórico",
-            "Calibração", "Configurações", "Diagnóstico",
+            ("Visão geral", "overview", 0), ("Novo ensaio", "new_test", 1),
+            ("Histórico", "history", 4), ("Cálculos", "calculations", 2),
+            ("Calibração", "calibration", 5), ("Configurações", "settings", 6),
         ]
-        for index, text in enumerate(nav_items):
+        for text, icon, page_index in nav_items:
             button = QPushButton(text)
             button.setObjectName("navButton")
+            button.setIcon(QIcon(icon_path(icon)))
+            button.setIconSize(QSize(19, 19))
             button.setCheckable(True)
             button.setAutoExclusive(True)
-            button.clicked.connect(lambda _checked=False, i=index: self._navigate(i))
+            button.clicked.connect(lambda _checked=False, i=page_index: self._navigate(i))
             side_layout.addWidget(button)
             self.nav_buttons.append(button)
+            self.nav_by_page[page_index] = button
         self.nav_buttons[0].setChecked(True)
+        advanced = QLabel("FERRAMENTAS")
+        advanced.setObjectName("sidebarCaption")
+        side_layout.addWidget(advanced)
+        for text, icon, page_index in [("Gráficos avançados", "graphs", 3), ("Diagnóstico", "diagnostics", 7), ("Sobre", "about", 8)]:
+            button = QPushButton(text); button.setObjectName("navButton")
+            button.setIcon(QIcon(icon_path(icon))); button.setIconSize(QSize(19, 19))
+            button.setCheckable(True); button.setAutoExclusive(True)
+            button.clicked.connect(lambda _checked=False, i=page_index: self._navigate(i))
+            side_layout.addWidget(button); self.nav_buttons.append(button); self.nav_by_page[page_index] = button
         side_layout.addStretch()
         version = QLabel(f"Versão {self.config.get('aplicacao.versao', '1.0.0')}")
-        version.setStyleSheet("color: #AFC8D0; padding: 8px;")
+        version.setObjectName("sidebarVersion")
         side_layout.addWidget(version)
         root_layout.addWidget(sidebar)
 
         main = QVBoxLayout()
-        main.setContentsMargins(16, 12, 16, 14)
-        main.setSpacing(10)
+        main.setContentsMargins(20, 16, 20, 14)
+        main.setSpacing(12)
         root_layout.addLayout(main, 1)
         topbar = QFrame()
         topbar.setObjectName("topbar")
         top_layout = QHBoxLayout(topbar)
         top_layout.setContentsMargins(14, 9, 14, 9)
-        system_name = QLabel(self.config.get("aplicacao.nome", "Supervisor de Porosímetro"))
-        system_name.setObjectName("sectionTitle")
+        self.header_title = QLabel("Visão geral")
+        self.header_title.setObjectName("headerTitle")
         self.current_test_label = QLabel("Nenhum ensaio ativo")
         self.current_test_label.setObjectName("muted")
         name_box = QVBoxLayout()
-        name_box.addWidget(system_name)
+        name_box.addWidget(self.header_title)
         name_box.addWidget(self.current_test_label)
         top_layout.addLayout(name_box)
         top_layout.addStretch()
-        self.connection_badge = QLabel("Desconectado")
-        self.connection_badge.setObjectName("pillNeutral")
-        self.equipment_badge = QLabel("Aguardando dados")
-        self.equipment_badge.setObjectName("pillNeutral")
+        self.mode_badge = StatusBadge("MODO REAL", "info")
+        self.connection_badge = StatusBadge("Desconectado", "neutral")
+        self.equipment_badge = StatusBadge("Aguardando dados", "neutral")
         self.clock_label = QLabel()
         self.user_label = QLabel(f"Usuário: {self.config.get('aplicacao.usuario', 'Operador')}")
+        self.clock_label.setVisible(False)
+        self.user_label.setVisible(False)
+        self.user_label.setToolTip(f"Operador atual: {self.config.get('aplicacao.usuario', 'Operador')}")
+        top_layout.addWidget(self.mode_badge)
         top_layout.addWidget(self.connection_badge)
         top_layout.addWidget(self.equipment_badge)
         top_layout.addWidget(self.clock_label)
@@ -157,7 +192,7 @@ class MainWindow(QMainWindow):
         main.addWidget(topbar)
 
         connection_bar = QFrame()
-        connection_bar.setObjectName("card")
+        connection_bar.setObjectName("connectionBar")
         connection_layout = QHBoxLayout(connection_bar)
         connection_layout.setContentsMargins(12, 8, 12, 8)
         self.port_combo = QComboBox()
@@ -169,6 +204,7 @@ class MainWindow(QMainWindow):
         refresh_ports.clicked.connect(self._refresh_ports)
         self.connect_button = QPushButton("Conectar")
         self.connect_button.setObjectName("primary")
+        self.connect_button.setIcon(QIcon(icon_path("connect")))
         self.connect_button.clicked.connect(self._toggle_serial)
         self.simulation_button = QPushButton("Iniciar simulação")
         self.simulation_button.clicked.connect(self._toggle_simulation)
@@ -187,10 +223,9 @@ class MainWindow(QMainWindow):
         connection_layout.addWidget(QLabel("Baud"))
         connection_layout.addWidget(self.baud_combo)
         connection_layout.addWidget(self.connect_button)
-        connection_layout.addSpacing(16)
+        connection_layout.addStretch()
         connection_layout.addWidget(self.simulation_button)
         connection_layout.addWidget(self.sim_fault)
-        connection_layout.addStretch()
         main.addWidget(connection_bar)
 
         self.stack = QStackedWidget()
@@ -202,9 +237,10 @@ class MainWindow(QMainWindow):
         self.calibration = CalibrationPage()
         self.settings = SettingsPage(self.config.data)
         self.diagnostics = DiagnosticsPage()
+        self.about = AboutPage(self.config.get("aplicacao.versao", "2.0.0"))
         for page in (
             self.overview, self.test_page, self.calculations, self.graphs, self.history,
-            self.calibration, self.settings, self.diagnostics,
+            self.calibration, self.settings, self.diagnostics, self.about,
         ):
             self.stack.addWidget(page)
         main.addWidget(self.stack, 1)
@@ -240,7 +276,7 @@ class MainWindow(QMainWindow):
     def _load_style(self) -> None:
         style_path = Path(__file__).with_name("styles.qss")
         self.setStyleSheet(style_path.read_text(encoding="utf-8"))
-        pg.setConfigOptions(antialias=True, foreground="#405860")
+        pg.setConfigOptions(antialias=True, foreground=COLORS["muted"], background=COLORS["surface"])
 
     def _setup_timers(self) -> None:
         self.clock_timer = QTimer(self)
@@ -250,6 +286,11 @@ class MainWindow(QMainWindow):
 
     def _navigate(self, index: int) -> None:
         self.stack.setCurrentIndex(index)
+        titles = {0: "Visão geral", 1: "Novo ensaio", 2: "Cálculos", 3: "Gráficos avançados", 4: "Histórico de ensaios", 5: "Calibração", 6: "Configurações", 7: "Diagnóstico", 8: "Sobre"}
+        self.header_title.setText(titles.get(index, "Supervisor"))
+        button = self.nav_by_page.get(index)
+        if button:
+            button.setChecked(True)
         if index == 4:
             self._refresh_history()
         elif index == 5:
@@ -258,6 +299,9 @@ class MainWindow(QMainWindow):
             self._refresh_calculation_history()
 
     def _set_badge(self, label: QLabel, text: str, state: str) -> None:
+        if isinstance(label, StatusBadge):
+            label.set_state(text, state)
+            return
         label.setText(text)
         label.setObjectName({
             "good": "pillGood", "warn": "pillWarn", "bad": "pillBad"
@@ -289,7 +333,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Porta serial", "Selecione uma porta serial válida.")
             return
         self._stop_simulation()
-        self.serial_worker = SerialWorker(port, int(self.baud_combo.currentText()))
+        self.serial_worker = SerialWorker(port, int(self.baud_combo.currentText()), reconnect=bool(self.config.get("comunicacao.reconexao_automatica", True)))
         self.serial_worker.line_received.connect(self.acquisition.process_real)
         self.serial_worker.state_changed.connect(self._on_connection_state)
         self.serial_worker.communication_error.connect(self._on_serial_error)
@@ -343,6 +387,7 @@ class MainWindow(QMainWindow):
                         "good" if connected else "neutral")
         self.diagnostics.values["connection"].setText(message)
         self.diagnostics.values["mode"].setText("Real")
+        self.mode_badge.set_state("MODO REAL", "info")
         if not connected:
             self.connect_button.setText("Conectar")
 
@@ -356,6 +401,7 @@ class MainWindow(QMainWindow):
         )
         self.diagnostics.values["connection"].setText(message)
         self.diagnostics.values["mode"].setText("Simulação" if active else "—")
+        self.mode_badge.set_state("SIMULAÇÃO" if active else "MODO REAL", "warn" if active else "info")
         self.overview.simulation_banner.setVisible(active)
 
     def _on_serial_error(self, message: str) -> None:
@@ -373,9 +419,11 @@ class MainWindow(QMainWindow):
         self.calculations.update_measurement(measurement)
         self.diagnostics.raw.setPlainText(measurement.raw_message)
         self.diagnostics.values["ma_pressure"].setText(self._format_ma(measurement.pressure.current_ma))
-        self.diagnostics.values["ma_low"].setText(self._format_ma(measurement.low_flow.current_ma))
-        self.diagnostics.values["ma_high"].setText(self._format_ma(measurement.high_flow.current_ma))
-        self._set_badge(self.equipment_badge, "Operação normal", "good")
+        self._last_firmware_version = measurement.firmware_version
+        self.diagnostics.values["flow_health"].setText("OK" if measurement.flow.valid else "Falha")
+        self.diagnostics.values["reading_age"].setText("0.0 s")
+        healthy = measurement.pressure.valid and measurement.flow.valid
+        self._set_badge(self.equipment_badge, "Operação normal" if healthy else "Sensor em falha", "good" if healthy else "bad")
         if self.test_service.current:
             try:
                 recorded = self.test_service.record(measurement)
@@ -416,11 +464,25 @@ class MainWindow(QMainWindow):
     def _update_counters(self, valid: int, invalid: int) -> None:
         self.diagnostics.values["valid"].setText(str(valid))
         self.diagnostics.values["invalid"].setText(str(invalid))
+        self.overview.valid_count.setText(str(valid))
+        self.overview.invalid_count.setText(str(invalid))
 
     def _start_test(self) -> None:
         if self.test_service.current:
             QMessageBox.information(self, "Ensaio ativo", "Finalize o ensaio atual antes de iniciar outro.")
             return
+        if self.simulating:
+            response = QMessageBox.question(
+                self, "Ensaio simulado",
+                "Os dados não vêm do equipamento real e o relatório será marcado como SIMULADO. Continuar?",
+            )
+            if response != QMessageBox.StandardButton.Yes:
+                return
+        else:
+            errors = self.config.real_mode_errors()
+            if errors:
+                QMessageBox.critical(self, "Configuração real incompleta", "Não é seguro iniciar o ensaio real:\n\n• " + "\n• ".join(errors))
+                return
         dialog = TestSetupDialog(
             self.test_repository.next_code(),
             Path(self.config.get("dados.diretorio_exportacao") or self.paths.exports),
@@ -429,7 +491,11 @@ class MainWindow(QMainWindow):
         if dialog.exec() != dialog.DialogCode.Accepted:
             return
         try:
-            session = self.test_service.start(dialog.definition())
+            definition = dialog.definition()
+            definition.configuration_snapshot = json.dumps(self.config.data, ensure_ascii=False, sort_keys=True)
+            definition.firmware_version = getattr(self, "_last_firmware_version", "")
+            definition.simulated = self.simulating
+            session = self.test_service.start(definition)
             self.graphs.reset()
             self.test_page.reset()
             self.test_page.set_session(session)
@@ -439,7 +505,7 @@ class MainWindow(QMainWindow):
             self.overview.set_test_active(True)
             self.current_test_label.setText(f"{session.definition.code} — {session.definition.sample_name}")
             self._navigate(0)
-            self.nav_buttons[0].setChecked(True)
+            self.nav_by_page[0].setChecked(True)
         except Exception as exc:
             logger.exception("Falha ao criar ensaio")
             QMessageBox.critical(self, "Novo ensaio", f"Não foi possível iniciar:\n{exc}")
@@ -523,7 +589,7 @@ class MainWindow(QMainWindow):
         self.calculations.set_session(definition)
         self._refresh_calculation_history()
         self._navigate(2)
-        self.nav_buttons[2].setChecked(True)
+        self.nav_by_page[2].setChecked(True)
 
     @staticmethod
     def _definition_from_record(row) -> object:
@@ -535,7 +601,6 @@ class MainWindow(QMainWindow):
             operator=row["operador"], description=row["descricao"] or "",
             test_type=row["tipo"] or "Porosimetria por gás", notes=row["observacoes"] or "",
             expected_pressure_range=row["faixa_pressao"] or "",
-            primary_flow_meter=row["flow_meter_principal"] or "Automático",
             pressure_unit=row["unidade_pressao"] or "bar",
             flow_unit=row["unidade_vazao"] or "L/min",
             acquisition_interval=row["intervalo_aquisicao"] or 1.0,
@@ -546,6 +611,9 @@ class MainWindow(QMainWindow):
             gas_type=row["tipo_gas"] or "Helio", temperature_c=row["temperatura_c"] or 20.0,
             atmospheric_pressure_kpa=row["pressao_atmosferica_kpa"] or 101.325,
             pressure_reference=row["referencia_pressao"] or "manometrica",
+            configuration_snapshot=row["configuracao_json"] or "",
+            firmware_version=row["versao_firmware"] or "",
+            simulated=bool(row["simulado"]),
         )
 
     def _save_calculation(
@@ -584,23 +652,16 @@ class MainWindow(QMainWindow):
         directory = QFileDialog.getExistingDirectory(self, "Diretório de exportação", str(default))
         if not directory:
             return
-        try:
-            method = {
-                "csv": self.export_service.export_csv,
-                "xlsx": self.export_service.export_xlsx,
-                "json": self.export_service.export_json,
-                "pdf": self.export_service.export_pdf,
-            }[format_name]
-            if format_name == "csv":
-                target = method(
-                    test_id, Path(directory), self.config.get("dados.separador_csv", ";")
-                )
-            else:
-                target = method(test_id, Path(directory))
-            QMessageBox.information(self, "Exportação concluída", f"Arquivo salvo em:\n{target}")
-        except Exception as exc:
-            logger.exception("Falha na exportação")
-            QMessageBox.critical(self, "Falha na exportação", str(exc))
+        method = {"csv": self.export_service.export_csv, "xlsx": self.export_service.export_xlsx, "json": self.export_service.export_json, "pdf": self.export_service.export_pdf}[format_name]
+        args: tuple[object, ...] = (test_id, Path(directory), self.config.get("dados.separador_csv", ";")) if format_name == "csv" else (test_id, Path(directory))
+        worker = ExportWorker(method, args)
+        self.export_workers.add(worker)
+        worker.completed.connect(lambda target: QMessageBox.information(self, "Exportação concluída", f"Arquivo salvo em:\n{target}"))
+        worker.failed.connect(lambda error: QMessageBox.critical(self, "Falha na exportação", error))
+        worker.finished.connect(lambda: self.export_workers.discard(worker))
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+        self.statusBar().showMessage("Exportação em andamento…", 3000)
 
     def _delete_test(self, test_id: int) -> None:
         row = self.test_repository.get(test_id)
@@ -717,6 +778,7 @@ class MainWindow(QMainWindow):
         if self.acquisition.last_message_at:
             age = (now - self.acquisition.last_message_at).total_seconds()
             self.diagnostics.values["last_age"].setText(f"{age:.1f} s")
+            self.diagnostics.values["reading_age"].setText(f"{age:.1f} s")
         self.diagnostics.values["database"].setText(
             "Operacional" if self.database.health_check() else "Falha"
         )
@@ -742,4 +804,7 @@ class MainWindow(QMainWindow):
                 return
         self._stop_serial()
         self._stop_simulation()
+        for worker in tuple(self.export_workers):
+            worker.wait(5000)
+        self.database.close()
         event.accept()
