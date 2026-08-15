@@ -7,7 +7,6 @@ from typing import Any
 from PySide6.QtCore import QObject, QTimer, Signal, Slot
 
 from communication.protocol_parser import ProtocolError, ProtocolParser
-from core.calculations import FlowMeterSelector
 from core.models import Measurement
 from services.alarm_service import AlarmService
 
@@ -26,15 +25,14 @@ class AcquisitionService(QObject):
         self.parser = ProtocolParser(
             config["sensores"], config["aquisicao"].get("fonte_valor", "comparar")
         )
-        flow = config["flow_meter"]
-        self.selector = FlowMeterSelector(
-            float(flow["trocar_alta_percentual"]),
-            float(flow["retornar_baixa_percentual"]),
-        )
         self.alarm_service = AlarmService(config["sensores"])
         self.valid_messages = 0
         self.invalid_messages = 0
         self.last_message_at: datetime | None = None
+        self.monitoring_started_at = datetime.now()
+        self.last_sequence: int | None = None
+        self.lost_sequences = 0
+        self.repeated_sequences = 0
         self.last_raw_message = ""
         self.simulation = False
         self._timeout_announced = False
@@ -55,16 +53,7 @@ class AcquisitionService(QObject):
         self.last_raw_message = raw
         try:
             measurement = self.parser.parse(raw, simulated)
-            low_cfg = self.config["sensores"]["vazao_baixa"]
-            mode = self.config["flow_meter"].get("modo", "automatico")
-            if mode == "automatico":
-                measurement.active_flow_meter = self.selector.select(
-                    measurement.low_flow.value,
-                    float(low_cfg["limite_inferior"]),
-                    float(low_cfg["limite_superior"]),
-                )
-            else:
-                measurement.active_flow_meter = "alta" if mode == "alta" else "baixa"
+            self._track_sequence(measurement.sequence)
             self.valid_messages += 1
             self.last_message_at = datetime.now()
             self.simulation = simulated
@@ -79,13 +68,17 @@ class AcquisitionService(QObject):
 
     def reset_counters(self) -> None:
         self.valid_messages = self.invalid_messages = 0
+        self.monitoring_started_at = datetime.now()
+        self.last_message_at = None
+        self.last_sequence = None
         self.counters_changed.emit(0, 0)
 
     def _check_timeout(self) -> None:
-        if not self.last_message_at or self._timeout_announced:
+        if self._timeout_announced:
             return
         timeout = float(self.config["comunicacao"].get("timeout_s", 3.0))
-        age = (datetime.now() - self.last_message_at).total_seconds()
+        reference = self.last_message_at or self.monitoring_started_at
+        age = (datetime.now() - reference).total_seconds()
         if age > timeout:
             self._timeout_announced = True
             message = f"Nenhum dado recebido há {age:.1f} s"
@@ -93,3 +86,16 @@ class AcquisitionService(QObject):
             alarm = self.alarm_service.communication_alarm(message)
             if alarm:
                 self.alarm_raised.emit(alarm)
+
+    def _track_sequence(self, sequence: int | None) -> None:
+        if sequence is None:
+            return
+        if self.last_sequence is not None:
+            if sequence == self.last_sequence:
+                self.repeated_sequences += 1
+                self.invalid_messages += 1
+            elif sequence > self.last_sequence + 1:
+                self.lost_sequences += sequence - self.last_sequence - 1
+            elif sequence < self.last_sequence:
+                self.invalid_messages += 1
+        self.last_sequence = sequence

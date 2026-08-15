@@ -53,9 +53,8 @@ class TestSetupDialog(QDialog):
         self.test_type.addItems(["Porosimetria por gás", "Permeabilidade", "Porosidade e permeabilidade"])
         self.notes = QTextEdit()
         self.notes.setMaximumHeight(65)
-        self.expected_range = QLineEdit("0–10 bar")
-        self.flow = QComboBox()
-        self.flow.addItems(["Automático", "Baixa vazão", "Alta vazão"])
+        self.expected_range = QLineEdit()
+        self.expected_range.setPlaceholderText("Use a faixa confirmada no manual do transdutor")
         self.pressure_unit = QComboBox()
         self.pressure_unit.addItems(["bar", "kPa", "MPa", "psi"])
         self.flow_unit = QComboBox()
@@ -75,7 +74,7 @@ class TestSetupDialog(QDialog):
             ("Identificação", self.identification), ("Operador*", self.operator),
             ("Descrição", self.description), ("Tipo de ensaio", self.test_type),
             ("Observações", self.notes), ("Faixa esperada", self.expected_range),
-            ("Flow meter principal", self.flow), ("Unidade de pressão", self.pressure_unit),
+            ("Unidade de pressão", self.pressure_unit),
             ("Unidade de vazão", self.flow_unit), ("Intervalo de aquisição", self.interval),
         ]:
             form.addRow(label, widget)
@@ -152,7 +151,8 @@ class TestSetupDialog(QDialog):
         required = [self.code, self.sample, self.operator]
         if any(not field.text().strip() for field in required):
             for field in required:
-                field.setStyleSheet("border-color: #C43D3D;" if not field.text().strip() else "")
+                field.setProperty("validationError", not field.text().strip())
+                field.style().unpolish(field); field.style().polish(field)
             return
         self.accept()
 
@@ -176,7 +176,6 @@ class TestSetupDialog(QDialog):
             test_type=self.test_type.currentText(),
             notes=self.notes.toPlainText().strip(),
             expected_pressure_range=self.expected_range.text().strip(),
-            primary_flow_meter=self.flow.currentText(),
             pressure_unit=self.pressure_unit.currentText(),
             flow_unit=self.flow_unit.currentText(),
             acquisition_interval=self.interval.value(),

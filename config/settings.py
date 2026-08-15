@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
+import sqlite3
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -94,5 +94,27 @@ class ConfigManager:
         backup_dir = self.paths.data / "backups"
         backup_dir.mkdir(exist_ok=True)
         target = backup_dir / f"{source.stem}_backup{source.suffix}"
-        shutil.copy2(source, target)
+        with sqlite3.connect(source) as source_connection, sqlite3.connect(target) as target_connection:
+            source_connection.backup(target_connection)
+            result = target_connection.execute("PRAGMA integrity_check").fetchone()
+            if not result or result[0] != "ok":
+                raise OSError("Falha na verificação de integridade do backup SQLite")
         return target
+
+    def real_mode_errors(self) -> list[str]:
+        """Retorna parâmetros obrigatórios ausentes sem inventar dados do equipamento."""
+        errors: list[str] = []
+        pressure = self.get("sensores.pressao", {})
+        if pressure.get("limite_inferior") is None or pressure.get("limite_superior") is None:
+            errors.append("Informe a faixa mínima e máxima do transdutor de pressão")
+        flow = self.get("flow_meter", {})
+        required = (
+            "endereco_escravo", "baud_rate", "paridade", "stop_bits", "funcao",
+            "registrador_inicial", "quantidade_registradores", "tipo_dado",
+            "ordem_bytes", "ordem_palavras", "fator_escala", "unidade_nativa",
+        )
+        if not flow.get("configurado") or any(flow.get(key) is None for key in required):
+            errors.append("Complete e confirme a configuração Modbus do flow meter")
+        if not self.get("comunicacao.porta"):
+            errors.append("Selecione a porta serial do ESP32")
+        return errors

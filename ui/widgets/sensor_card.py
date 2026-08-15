@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFrame,
@@ -13,12 +14,13 @@ from PySide6.QtWidgets import (
 from core.calculations import range_percent
 from core.constants import ReadingQuality
 from core.models import SensorReading
+from ui.widgets.components import StatusBadge
 
 
 class SensorCard(QFrame):
     def __init__(self, title: str, unit: str, lower: float, upper: float, decimals: int = 2):
         super().__init__()
-        self.setObjectName("card")
+        self.setObjectName("measurementCard")
         self.unit = unit
         self.lower = lower
         self.upper = upper
@@ -31,8 +33,7 @@ class SensorCard(QFrame):
         header = QHBoxLayout()
         title_label = QLabel(title)
         title_label.setObjectName("sectionTitle")
-        self.status_label = QLabel("Sem dados")
-        self.status_label.setObjectName("pillNeutral")
+        self.status_label = StatusBadge("Sem dados", "neutral")
         header.addWidget(title_label)
         header.addStretch()
         header.addWidget(self.status_label)
@@ -54,6 +55,10 @@ class SensorCard(QFrame):
         self.range_bar.setTextVisible(False)
         self.range_bar.setValue(0)
         layout.addWidget(self.range_bar)
+
+        self.updated_label = QLabel("Última atualização: aguardando dados")
+        self.updated_label.setObjectName("sensorMeta")
+        layout.addWidget(self.updated_label)
 
         details = QGridLayout()
         self.current_label = QLabel("— mA")
@@ -92,16 +97,16 @@ class SensorCard(QFrame):
         self.min_label.setText(f"{self.minimum:.{self.decimals}f}" if self.minimum is not None else "—")
         self.max_label.setText(f"{self.maximum:.{self.decimals}f}" if self.maximum is not None else "—")
         style = {
-            ReadingQuality.VALID: "pillGood",
-            ReadingQuality.SIMULATED: "pillWarn",
-            ReadingQuality.WARNING: "pillWarn",
-            ReadingQuality.INVALID: "pillBad",
-            ReadingQuality.MISSING: "pillNeutral",
+            ReadingQuality.VALID: "good",
+            ReadingQuality.SIMULATED: "warn",
+            ReadingQuality.WARNING: "warn",
+            ReadingQuality.INVALID: "bad",
+            ReadingQuality.MISSING: "neutral",
         }[reading.quality]
-        self.status_label.setObjectName(style)
-        self.status_label.setText(reading.quality.value.capitalize())
-        self.status_label.style().unpolish(self.status_label)
-        self.status_label.style().polish(self.status_label)
+        self.status_label.set_state(reading.quality.value.capitalize(), style)
+        self.setProperty("state", style)
+        self.style().unpolish(self); self.style().polish(self)
+        self.updated_label.setText(f"Última atualização: {datetime.now():%H:%M:%S} · agora")
 
     def reset_statistics(self) -> None:
         self.minimum = self.maximum = None

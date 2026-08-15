@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA_SQL = """
 PRAGMA journal_mode=WAL;
@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER NOT NULL
 );
 INSERT INTO schema_version(version)
-SELECT 2 WHERE NOT EXISTS (SELECT 1 FROM schema_version);
+SELECT 3 WHERE NOT EXISTS (SELECT 1 FROM schema_version);
 
 CREATE TABLE IF NOT EXISTS usuarios (
     id INTEGER PRIMARY KEY,
@@ -54,6 +54,9 @@ CREATE TABLE IF NOT EXISTS ensaios (
     temperatura_c REAL,
     pressao_atmosferica_kpa REAL,
     referencia_pressao TEXT,
+    configuracao_json TEXT,
+    versao_firmware TEXT,
+    simulado INTEGER NOT NULL DEFAULT 0,
     inicio TEXT NOT NULL,
     fim TEXT,
     duracao_segundos REAL DEFAULT 0,
@@ -71,6 +74,17 @@ CREATE TABLE IF NOT EXISTS medicoes (
     timestamp_esp32 INTEGER,
     pressao_ma REAL,
     pressao REAL,
+    pressao_ads_raw REAL,
+    unidade_pressao TEXT,
+    pressao_valida INTEGER,
+    vazao_raw REAL,
+    vazao REAL,
+    unidade_vazao TEXT,
+    vazao_valida INTEGER,
+    sequencia INTEGER,
+    versao_schema INTEGER,
+    versao_firmware TEXT,
+    simulado INTEGER NOT NULL DEFAULT 0,
     vazao_baixa_ma REAL,
     vazao_baixa REAL,
     vazao_alta_ma REAL,
@@ -166,6 +180,16 @@ TEST_COLUMNS: dict[str, str] = {
     "temperatura_c": "REAL",
     "pressao_atmosferica_kpa": "REAL",
     "referencia_pressao": "TEXT",
+    "configuracao_json": "TEXT",
+    "versao_firmware": "TEXT",
+    "simulado": "INTEGER NOT NULL DEFAULT 0",
+}
+
+MEASUREMENT_COLUMNS: dict[str, str] = {
+    "pressao_ads_raw": "REAL", "unidade_pressao": "TEXT", "pressao_valida": "INTEGER",
+    "vazao_raw": "REAL", "vazao": "REAL", "unidade_vazao": "TEXT", "vazao_valida": "INTEGER",
+    "sequencia": "INTEGER", "versao_schema": "INTEGER", "versao_firmware": "TEXT",
+    "simulado": "INTEGER NOT NULL DEFAULT 0",
 }
 
 
@@ -177,4 +201,13 @@ def apply_migrations(connection: sqlite3.Connection) -> None:
     for name, sql_type in TEST_COLUMNS.items():
         if name not in existing:
             connection.execute(f"ALTER TABLE ensaios ADD COLUMN {name} {sql_type}")
+    measurement_existing = {row[1] for row in connection.execute("PRAGMA table_info(medicoes)")}
+    for name, sql_type in MEASUREMENT_COLUMNS.items():
+        if name not in measurement_existing:
+            connection.execute(f"ALTER TABLE medicoes ADD COLUMN {name} {sql_type}")
+    connection.execute(
+        """UPDATE medicoes SET vazao=COALESCE(vazao, vazao_baixa, vazao_alta),
+           unidade_vazao=COALESCE(unidade_vazao, 'L/min'), versao_schema=COALESCE(versao_schema, 0)
+           WHERE vazao IS NULL"""
+    )
     connection.execute("UPDATE schema_version SET version=?", (SCHEMA_VERSION,))

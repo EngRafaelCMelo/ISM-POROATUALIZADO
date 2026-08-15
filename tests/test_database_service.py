@@ -16,9 +16,8 @@ from services.test_service import TestService as Service
 def measurement() -> Measurement:
     return Measurement(
         received_at=datetime.now(),
-        pressure=SensorReading(2.0, 7.2, ReadingQuality.VALID),
-        low_flow=SensorReading(1.0, 7.2, ReadingQuality.VALID),
-        high_flow=SensorReading(10.0, 7.2, ReadingQuality.VALID),
+        pressure=SensorReading(value=2.0, current_ma=7.2, quality=ReadingQuality.VALID, valid=True),
+        flow=SensorReading(value=10.0, quality=ReadingQuality.VALID, valid=True),
     )
 
 

@@ -10,9 +10,11 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import mm
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import Image as ReportImage, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.lib.utils import ImageReader
 
 from database.repositories import CalculationRepository, EventRepository, TestRepository
+from ui.resources import branding_path
 
 
 class ExportService:
@@ -48,11 +50,13 @@ class ExportService:
             "timestamp_esp32": "Timestamp ESP32 (ms)",
             "pressao_ma": "Pressão (mA)",
             "pressao": f"Pressão ({test['unidade_pressao']})",
-            "vazao_baixa_ma": "Vazão baixa (mA)",
-            "vazao_baixa": f"Vazão baixa ({test['unidade_vazao']})",
-            "vazao_alta_ma": "Vazão alta (mA)",
-            "vazao_alta": f"Vazão alta ({test['unidade_vazao']})",
-            "flow_meter_ativo": "Flow meter ativo",
+            "pressao_valida": "Pressão válida",
+            "vazao_raw": "Registro bruto de vazão",
+            "vazao": f"Vazão ({test['unidade_vazao']})",
+            "vazao_valida": "Vazão válida",
+            "sequencia": "Sequência",
+            "versao_firmware": "Versão do firmware",
+            "simulado": "Simulado",
             "qualidade": "Qualidade",
         }
         selected = measurements[[c for c in columns if c in measurements.columns]].rename(columns=columns)
@@ -76,7 +80,7 @@ class ExportService:
         test, measurements, alarms, markers, calculations = self._data(test_id)
         target = self._safe_target(directory, f"{test['codigo']}.xlsx")
         summary = pd.DataFrame([dict(test)])
-        numeric = [c for c in ("pressao", "vazao_baixa", "vazao_alta") if c in measurements]
+        numeric = [c for c in ("pressao", "vazao") if c in measurements]
         stats = measurements[numeric].describe().T.reset_index() if numeric else pd.DataFrame()
         with pd.ExcelWriter(target, engine="openpyxl") as writer:
             summary.to_excel(writer, sheet_name="Resumo", index=False)
@@ -99,10 +103,15 @@ class ExportService:
             str(target), pagesize=A4, rightMargin=18 * mm, leftMargin=18 * mm,
             topMargin=16 * mm, bottomMargin=16 * mm,
         )
-        story = [
-            Paragraph("Relatório de Ensaio — Porosímetro", styles["Title"]),
-            Spacer(1, 8 * mm),
-        ]
+        logo_path = branding_path("ism_logo_horizontal.png")
+        logo_width_px, logo_height_px = ImageReader(str(logo_path)).getSize()
+        logo_width = 58 * mm
+        logo = ReportImage(str(logo_path), width=logo_width, height=logo_width * logo_height_px / logo_width_px)
+        header = Table([[logo, Paragraph("Relatório de Ensaio — Porosímetro", styles["Title"])]], colWidths=[64 * mm, 101 * mm])
+        header.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 4)]))
+        story = [header, Spacer(1, 7 * mm)]
+        if test["simulado"]:
+            story.extend([Paragraph("RELATÓRIO DE DADOS SIMULADOS", styles["Heading1"]), Spacer(1, 4 * mm)])
         details = [
             ["Código", test["codigo"], "Status", test["status"]],
             ["Amostra", test["amostra_nome"], "Operador", test["operador"]],
@@ -123,7 +132,7 @@ class ExportService:
         story.extend([table, Spacer(1, 7 * mm), Paragraph("Resumo estatístico", styles["Heading2"])])
         stat_rows = [["Variável", "Mínimo", "Média", "Máximo", "Desvio padrão"]]
         for column, label in [
-            ("pressao", "Pressão"), ("vazao_baixa", "Vazão baixa"), ("vazao_alta", "Vazão alta")
+            ("pressao", "Pressão"), ("vazao", "Vazão")
         ]:
             if column in measurements and not measurements[column].dropna().empty:
                 series = measurements[column].dropna()
