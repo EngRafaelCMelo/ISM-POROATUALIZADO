@@ -30,6 +30,12 @@ QPushButton#navButton:checked {
     background: #2A6B7F;
     font-weight: 600;
 }
+QPushButton#navAdvancedButton {
+    color: #AFC8D0; background: transparent; border: 1px solid #477382;
+    border-radius: 6px; text-align: left; padding: 9px 13px;
+    margin-top: 8px;
+}
+QPushButton#navAdvancedButton:hover { background: #215568; color: white; }
 QFrame#topbar, QFrame#card {
     background: white;
     border: 1px solid #DDE5E8;
@@ -40,6 +46,18 @@ QLabel#sectionTitle { font-size: 12pt; font-weight: 650; color: #244B58; }
 QLabel#sensorValue { font-size: 27pt; font-weight: 700; color: #143F4C; }
 QLabel#sensorUnit { color: #60757D; font-size: 11pt; }
 QLabel#muted { color: #72868D; }
+QLabel#workflowStep {
+    color: #245365; background: #EDF5F7; border: 1px solid #D3E5EA;
+    border-radius: 7px; padding: 9px 6px; font-weight: 600;
+}
+QLabel#workflowStepCurrent {
+    color: #174F63; background: #DCEFF5; border: 2px solid #2A7187;
+    border-radius: 7px; padding: 8px 6px; font-weight: 700;
+}
+QLabel#workflowStepDone {
+    color: #17653F; background: #E3F4E9; border: 1px solid #A9D8B9;
+    border-radius: 7px; padding: 9px 6px; font-weight: 600;
+}
 QLabel#pillGood {
     color: #177245; background: #E2F5EA; border-radius: 9px; padding: 3px 8px;
 }

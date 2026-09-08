@@ -47,7 +47,7 @@ class TestRepository:
                     definition.code, sample_id, definition.sample_name,
                     definition.sample_identification, definition.operator,
                     definition.description, definition.test_type, definition.notes,
-                    definition.expected_pressure_range, definition.primary_flow_meter,
+                    definition.expected_pressure_range, "Único",
                     definition.pressure_unit, definition.flow_unit,
                     definition.acquisition_interval, definition.export_directory,
                     now.isoformat(), TestStatus.RUNNING.value,
@@ -61,9 +61,7 @@ class TestRepository:
         return TestSession(test_id, definition, TestStatus.RUNNING, now)
 
     def save_measurement(self, test_id: int, measurement: Measurement) -> int:
-        maximum_flow = max(filter(lambda x: x is not None, [
-            measurement.low_flow.value, measurement.high_flow.value
-        ]), default=None)
+        maximum_flow = measurement.flow.value
         with self.db.transaction() as con:
             cur = con.execute(
                 """INSERT INTO medicoes(

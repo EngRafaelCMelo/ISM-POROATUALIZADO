@@ -38,8 +38,14 @@ class TestSetupDialog(QDialog):
         self.setWindowTitle("Novo ensaio")
         self.setMinimumSize(650, 650)
         layout = QVBoxLayout(self)
-        tabs = QTabWidget()
-        layout.addWidget(tabs)
+        intro = QLabel(
+            "Preencha os dados básicos e, para calcular porosidade, informe a geometria da amostra."
+        )
+        intro.setWordWrap(True)
+        intro.setObjectName("muted")
+        layout.addWidget(intro)
+        self.tabs = QTabWidget()
+        layout.addWidget(self.tabs)
 
         general_page = QWidget()
         form = QFormLayout(general_page)
@@ -47,46 +53,26 @@ class TestSetupDialog(QDialog):
         self.sample = QLineEdit()
         self.identification = QLineEdit()
         self.operator = QLineEdit("Operador")
-        self.description = QTextEdit()
-        self.description.setMaximumHeight(65)
         self.test_type = QComboBox()
         self.test_type.addItems(["Porosimetria por gás", "Permeabilidade", "Porosidade e permeabilidade"])
-        self.notes = QTextEdit()
-        self.notes.setMaximumHeight(65)
-        self.expected_range = QLineEdit("0–10 bar")
-        self.flow = QComboBox()
-        self.flow.addItems(["Automático", "Baixa vazão", "Alta vazão"])
-        self.pressure_unit = QComboBox()
-        self.pressure_unit.addItems(["bar", "kPa", "MPa", "psi"])
-        self.flow_unit = QComboBox()
-        self.flow_unit.addItems(["L/min", "mL/min"])
-        self.interval = QDoubleSpinBox()
-        self.interval.setRange(0.05, 60)
-        self.interval.setValue(1.0)
-        self.interval.setSuffix(" s")
-        self.export_dir = QLineEdit(str(default_export))
-        browse = QPushButton("Escolher…")
-        browse.clicked.connect(self._browse)
-        export_row = QHBoxLayout()
-        export_row.addWidget(self.export_dir)
-        export_row.addWidget(browse)
+        basic_help = QLabel("Campos com * são obrigatórios.")
+        basic_help.setObjectName("muted")
+        form.addRow(basic_help)
         for label, widget in [
-            ("Código do ensaio*", self.code), ("Nome da amostra*", self.sample),
-            ("Identificação", self.identification), ("Operador*", self.operator),
-            ("Descrição", self.description), ("Tipo de ensaio", self.test_type),
-            ("Observações", self.notes), ("Faixa esperada", self.expected_range),
-            ("Flow meter principal", self.flow), ("Unidade de pressão", self.pressure_unit),
-            ("Unidade de vazão", self.flow_unit), ("Intervalo de aquisição", self.interval),
+            ("Código do ensaio*", self.code),
+            ("Nome da amostra*", self.sample),
+            ("Identificação", self.identification),
+            ("Operador*", self.operator),
+            ("O que será medido", self.test_type),
         ]:
             form.addRow(label, widget)
-        form.addRow("Diretório de exportação", export_row)
-        tabs.addTab(general_page, "Identificação")
+        self.tabs.addTab(general_page, "1. Dados básicos")
 
-        physical_page = QWidget()
-        physical_form = QFormLayout(physical_page)
+        self.physical_page = QWidget()
+        physical_form = QFormLayout(self.physical_page)
         information = QLabel(
-            "Estes dados alimentam os cálculos de Boyle, porosidade, densidade e permeabilidade. "
-            "Podem ser completados ou ajustados posteriormente na tela Cálculos."
+            "Informe o volume geométrico manualmente ou preencha comprimento e diâmetro "
+            "para calculá-lo automaticamente."
         )
         information.setWordWrap(True)
         information.setObjectName("muted")
@@ -115,16 +101,53 @@ class TestSetupDialog(QDialog):
         self.length.valueChanged.connect(self._update_geometry)
         self.diameter.valueChanged.connect(self._update_geometry)
         physical_form.addRow(information)
-        physical_form.addRow("Comprimento L", self.length)
-        physical_form.addRow("Diâmetro D", self.diameter)
-        physical_form.addRow("Massa seca", self.mass)
+        physical_form.addRow("Comprimento da amostra", self.length)
+        physical_form.addRow("Diâmetro da amostra", self.diameter)
         physical_form.addRow("Volume geométrico manual", self.bulk_volume)
         physical_form.addRow("", self.geometry_preview)
-        physical_form.addRow("Gás de análise", self.gas)
+        physical_form.addRow("Massa seca (opcional)", self.mass)
+        physical_form.addRow("Gás utilizado", self.gas)
         physical_form.addRow("Temperatura", self.temperature)
         physical_form.addRow("Pressão atmosférica local", self.atmospheric)
         physical_form.addRow("Referência das pressões", self.pressure_reference)
-        tabs.addTab(physical_page, "Amostra e gás")
+        self.tabs.addTab(self.physical_page, "2. Amostra e gás")
+
+        advanced_page = QWidget()
+        advanced_form = QFormLayout(advanced_page)
+        advanced_help = QLabel(
+            "Normalmente os valores padrão abaixo não precisam ser alterados."
+        )
+        advanced_help.setWordWrap(True)
+        advanced_help.setObjectName("muted")
+        self.description = QTextEdit()
+        self.description.setMaximumHeight(65)
+        self.notes = QTextEdit()
+        self.notes.setMaximumHeight(65)
+        self.expected_range = QLineEdit("0–100 bar")
+        self.pressure_unit = QComboBox()
+        self.pressure_unit.addItems(["bar", "kPa", "MPa", "psi"])
+        self.flow_unit = QComboBox()
+        self.flow_unit.addItems(["L/min", "mL/min"])
+        self.interval = QDoubleSpinBox()
+        self.interval.setRange(0.05, 60)
+        self.interval.setValue(1.0)
+        self.interval.setSuffix(" s")
+        self.export_dir = QLineEdit(str(default_export))
+        browse = QPushButton("Escolher…")
+        browse.clicked.connect(self._browse)
+        export_row = QHBoxLayout()
+        export_row.addWidget(self.export_dir)
+        export_row.addWidget(browse)
+        advanced_form.addRow(advanced_help)
+        for label, widget in [
+            ("Descrição", self.description),
+            ("Observações", self.notes), ("Faixa esperada", self.expected_range),
+            ("Unidade de pressão", self.pressure_unit),
+            ("Unidade de vazão", self.flow_unit), ("Intervalo de aquisição", self.interval),
+        ]:
+            advanced_form.addRow(label, widget)
+        advanced_form.addRow("Pasta dos relatórios", export_row)
+        self.tabs.addTab(advanced_page, "3. Opções avançadas")
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Ok
@@ -142,6 +165,9 @@ class TestSetupDialog(QDialog):
             self.export_dir.setText(selected)
 
     def _update_geometry(self) -> None:
+        self.geometry_preview.setObjectName("muted")
+        self.geometry_preview.style().unpolish(self.geometry_preview)
+        self.geometry_preview.style().polish(self.geometry_preview)
         if self.length.value() > 0 and self.diameter.value() > 0:
             volume = cylindrical_volume_cm3(self.length.value(), self.diameter.value())
             self.geometry_preview.setText(f"Volume cilíndrico calculado: {volume:.5f} cm³")
@@ -153,6 +179,20 @@ class TestSetupDialog(QDialog):
         if any(not field.text().strip() for field in required):
             for field in required:
                 field.setStyleSheet("border-color: #C43D3D;" if not field.text().strip() else "")
+            self.tabs.setCurrentIndex(0)
+            return
+        requires_geometry = "poros" in self.test_type.currentText().lower()
+        has_geometry = self.bulk_volume.value() > 0 or (
+            self.length.value() > 0 and self.diameter.value() > 0
+        )
+        if requires_geometry and not has_geometry:
+            self.geometry_preview.setText(
+                "Informe o volume geométrico ou o comprimento e o diâmetro."
+            )
+            self.geometry_preview.setObjectName("pillWarn")
+            self.geometry_preview.style().unpolish(self.geometry_preview)
+            self.geometry_preview.style().polish(self.geometry_preview)
+            self.tabs.setCurrentWidget(self.physical_page)
             return
         self.accept()
 
@@ -176,7 +216,6 @@ class TestSetupDialog(QDialog):
             test_type=self.test_type.currentText(),
             notes=self.notes.toPlainText().strip(),
             expected_pressure_range=self.expected_range.text().strip(),
-            primary_flow_meter=self.flow.currentText(),
             pressure_unit=self.pressure_unit.currentText(),
             flow_unit=self.flow_unit.currentText(),
             acquisition_interval=self.interval.value(),

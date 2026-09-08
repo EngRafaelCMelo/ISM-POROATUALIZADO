@@ -2,7 +2,7 @@
 from pathlib import Path
 
 root = Path(SPECPATH)
-app_name = "PorosimetroSupervisorio_v1_1_1"
+app_name = "PorosimetroSupervisorio_v1_5_0"
 
 a = Analysis(
     [str(root / "app.py")],

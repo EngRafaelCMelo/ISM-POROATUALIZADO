@@ -26,11 +26,26 @@ class ProtocolParser:
             raise ProtocolError(f"JSON inválido: {exc.msg}") from exc
         if not isinstance(payload, dict):
             raise ProtocolError("A mensagem precisa ser um objeto JSON")
+        # Os nomes antigos continuam aceitos para não exigir atualização
+        # simultânea do firmware e do supervisório já instalados.
+        payload = dict(payload)
+        if "vazao" not in payload and "vazao_baixa" in payload:
+            payload["vazao"] = payload["vazao_baixa"]
+        if "vazao_ma" not in payload and "vazao_baixa_ma" in payload:
+            payload["vazao_ma"] = payload["vazao_baixa_ma"]
+        if "vazao_status" not in payload and "vazao_baixa_status" in payload:
+            payload["vazao_status"] = payload["vazao_baixa_status"]
         if not any(key in payload for key in (*SENSOR_KEYS, *SENSOR_MA_KEYS.values())):
             raise ProtocolError("Nenhum campo de sensor reconhecido")
 
         readings = {
-            key: self._reading(key, payload.get(key), payload.get(SENSOR_MA_KEYS[key]), simulated)
+            key: self._reading(
+                key,
+                payload.get(key),
+                payload.get(SENSOR_MA_KEYS[key]),
+                payload.get(f"{key}_status"),
+                simulated,
+            )
             for key in SENSOR_KEYS
         }
         timestamp = payload.get("timestamp_ms")
@@ -42,15 +57,19 @@ class ProtocolParser:
             received_at=datetime.now(),
             device_timestamp_ms=timestamp_ms,
             pressure=readings["pressao"],
-            low_flow=readings["vazao_baixa"],
-            high_flow=readings["vazao_alta"],
+            flow=readings["vazao"],
             communication_state=str(payload.get("status", "OK")),
             raw_message=raw.strip(),
             simulated=simulated,
         )
 
     def _reading(
-        self, key: str, device_raw: Any, current_raw: Any, simulated: bool
+        self,
+        key: str,
+        device_raw: Any,
+        current_raw: Any,
+        status_raw: Any,
+        simulated: bool,
     ) -> SensorReading:
         try:
             device_value = optional_number(device_raw)
@@ -78,6 +97,14 @@ class ProtocolParser:
         quality = classify_current(current, simulated)
         if current is None and device_value is not None:
             quality = ReadingQuality.SIMULATED if simulated else ReadingQuality.VALID
+        if (
+            self.value_source == "comparar"
+            and device_value is not None
+            and calculated is not None
+            and quality != ReadingQuality.INVALID
+            and abs(device_value - calculated) > float(cfg.get("tolerancia", 0.0))
+        ):
+            quality = ReadingQuality.WARNING
         quality = classify_value(
             value, float(cfg["limite_inferior"]), float(cfg["limite_superior"]), quality
         )
@@ -87,4 +114,5 @@ class ProtocolParser:
             quality=quality,
             device_value=device_value,
             calculated_value=calculated,
+            device_status=str(status_raw) if status_raw is not None else "",
         )

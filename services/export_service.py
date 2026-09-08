@@ -4,6 +4,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from xml.sax.saxutils import escape
 
 import pandas as pd
 from reportlab.lib import colors
@@ -40,6 +41,29 @@ class ExportService:
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         return directory / f"{target.stem}_{stamp}{target.suffix}"
 
+    @staticmethod
+    def _format_result(value: Any, unit: str = "") -> str:
+        if value is None:
+            return "—"
+        try:
+            formatted = f"{float(value):.6g}"
+        except (TypeError, ValueError):
+            return str(value)
+        return f"{formatted} {unit}".strip()
+
+    @staticmethod
+    def _current_measurements(measurements: pd.DataFrame) -> pd.DataFrame:
+        """Apresenta somente o hardware atual, sem expor colunas legadas."""
+        legacy = ["vazao_alta_ma", "vazao_alta", "flow_meter_ativo"]
+        current = measurements.drop(
+            columns=[column for column in legacy if column in measurements],
+            errors="ignore",
+        ).copy()
+        return current.rename(columns={
+            "vazao_baixa_ma": "vazao_ma",
+            "vazao_baixa": "vazao",
+        })
+
     def export_csv(self, test_id: int, directory: Path, separator: str = ";") -> Path:
         test, measurements, _, _, _ = self._data(test_id)
         target = self._safe_target(directory, f"{test['codigo']}_medicoes.csv")
@@ -48,11 +72,7 @@ class ExportService:
             "timestamp_esp32": "Timestamp ESP32 (ms)",
             "pressao_ma": "Pressão (mA)",
             "pressao": f"Pressão ({test['unidade_pressao']})",
-            "vazao_baixa_ma": "Vazão baixa (mA)",
-            "vazao_baixa": f"Vazão baixa ({test['unidade_vazao']})",
-            "vazao_alta_ma": "Vazão alta (mA)",
-            "vazao_alta": f"Vazão alta ({test['unidade_vazao']})",
-            "flow_meter_ativo": "Flow meter ativo",
+            "vazao_baixa": f"Vazão ({test['unidade_vazao']})",
             "qualidade": "Qualidade",
         }
         selected = measurements[[c for c in columns if c in measurements.columns]].rename(columns=columns)
@@ -62,6 +82,7 @@ class ExportService:
     def export_json(self, test_id: int, directory: Path) -> Path:
         test, measurements, alarms, markers, calculations = self._data(test_id)
         target = self._safe_target(directory, f"{test['codigo']}.json")
+        measurements = self._current_measurements(measurements)
         payload = {
             "ensaio": dict(test),
             "medicoes": measurements.to_dict(orient="records"),
@@ -76,7 +97,8 @@ class ExportService:
         test, measurements, alarms, markers, calculations = self._data(test_id)
         target = self._safe_target(directory, f"{test['codigo']}.xlsx")
         summary = pd.DataFrame([dict(test)])
-        numeric = [c for c in ("pressao", "vazao_baixa", "vazao_alta") if c in measurements]
+        measurements = self._current_measurements(measurements)
+        numeric = [c for c in ("pressao", "vazao") if c in measurements]
         stats = measurements[numeric].describe().T.reset_index() if numeric else pd.DataFrame()
         with pd.ExcelWriter(target, engine="openpyxl") as writer:
             summary.to_excel(writer, sheet_name="Resumo", index=False)
@@ -93,14 +115,14 @@ class ExportService:
 
     def export_pdf(self, test_id: int, directory: Path) -> Path:
         test, measurements, alarms, markers, calculations = self._data(test_id)
-        target = self._safe_target(directory, f"{test['codigo']}_resumo.pdf")
+        target = self._safe_target(directory, f"{test['codigo']}_relatorio_final.pdf")
         styles = getSampleStyleSheet()
         doc = SimpleDocTemplate(
             str(target), pagesize=A4, rightMargin=18 * mm, leftMargin=18 * mm,
             topMargin=16 * mm, bottomMargin=16 * mm,
         )
         story = [
-            Paragraph("Relatório de Ensaio — Porosímetro", styles["Title"]),
+            Paragraph("Relatório Final de Ensaio — Porosímetro", styles["Title"]),
             Spacer(1, 8 * mm),
         ]
         details = [
@@ -122,9 +144,7 @@ class ExportService:
         ]))
         story.extend([table, Spacer(1, 7 * mm), Paragraph("Resumo estatístico", styles["Heading2"])])
         stat_rows = [["Variável", "Mínimo", "Média", "Máximo", "Desvio padrão"]]
-        for column, label in [
-            ("pressao", "Pressão"), ("vazao_baixa", "Vazão baixa"), ("vazao_alta", "Vazão alta")
-        ]:
+        for column, label in [("pressao", "Pressão"), ("vazao_baixa", "Vazão")]:
             if column in measurements and not measurements[column].dropna().empty:
                 series = measurements[column].dropna()
                 stat_rows.append([
@@ -146,14 +166,21 @@ class ExportService:
                 result = json.loads(calculation["resultados_json"])
                 if calculation["tipo"] == "Lei de Boyle":
                     principal = (
-                        f"Vesq={result.get('skeletal_volume_mean_cm3', 0):.6g} cm³; "
-                        f"porosidade={result.get('porosity_mean_percent', 0):.6g}%"
+                        f"Porosidade aberta: {self._format_result(result.get('porosity_mean_percent'), '%')}; "
+                        f"volume de poros: {self._format_result(result.get('pore_volume_mean_cm3'), 'cm³')}; "
+                        f"volume esquelético: {self._format_result(result.get('skeletal_volume_mean_cm3'), 'cm³')}; "
+                        f"densidade esquelética: {self._format_result(result.get('skeletal_density_g_cm3'), 'g/cm³')}; "
+                        f"CV: {self._format_result(result.get('coefficient_variation_percent'), '%')}; "
+                        f"ciclos: {result.get('valid_cycles', '—')}"
                     )
                 elif calculation["tipo"] == "Permeabilidade a gás":
-                    principal = f"k={result.get('permeability_md', 0):.6g} mD"
+                    principal = f"k={self._format_result(result.get('permeability_md'), 'mD')}"
                 else:
-                    principal = f"k∞={result.get('intrinsic_permeability_md', 0):.6g} mD"
-                calculation_rows.append([calculation["tipo"], principal])
+                    principal = f"k∞={self._format_result(result.get('intrinsic_permeability_md'), 'mD')}"
+                calculation_rows.append([
+                    calculation["tipo"],
+                    Paragraph(escape(principal), styles["BodyText"]),
+                ])
             calculation_table = Table(calculation_rows, repeatRows=1, colWidths=[55 * mm, 110 * mm])
             calculation_table.setStyle(TableStyle([
                 ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F5D73")),
@@ -162,12 +189,21 @@ class ExportService:
                 ("PADDING", (0, 0), (-1, -1), 5),
             ]))
             story.extend([calculation_table, Spacer(1, 7 * mm)])
+        else:
+            story.extend([
+                Paragraph("Resultados de porosimetria e permeabilidade", styles["Heading2"]),
+                Paragraph("Nenhum cálculo foi salvo para este ensaio.", styles["BodyText"]),
+                Spacer(1, 7 * mm),
+            ])
         story.extend([
             Paragraph(f"Alarmes registrados: {len(alarms)}", styles["Heading3"]),
             Paragraph(f"Marcações do operador: {len(markers)}", styles["Heading3"]),
             Spacer(1, 15 * mm),
             Paragraph("Observações", styles["Heading2"]),
-            Paragraph(test["observacao_final"] or test["observacoes"] or "Sem observações.", styles["BodyText"]),
+            Paragraph(
+                escape(test["observacao_final"] or test["observacoes"] or "Sem observações."),
+                styles["BodyText"],
+            ),
             Spacer(1, 25 * mm),
             Paragraph("Assinatura: _________________________________________________", styles["BodyText"]),
         ])

@@ -14,6 +14,7 @@ class SensorReading:
     quality: ReadingQuality = ReadingQuality.MISSING
     device_value: float | None = None
     calculated_value: float | None = None
+    device_status: str = ""
 
 
 @dataclass(slots=True)
@@ -21,9 +22,7 @@ class Measurement:
     received_at: datetime
     device_timestamp_ms: int | None = None
     pressure: SensorReading = field(default_factory=SensorReading)
-    low_flow: SensorReading = field(default_factory=SensorReading)
-    high_flow: SensorReading = field(default_factory=SensorReading)
-    active_flow_meter: str = "baixa"
+    flow: SensorReading = field(default_factory=SensorReading)
     communication_state: str = "conectado"
     raw_message: str = ""
     simulated: bool = False
@@ -31,14 +30,15 @@ class Measurement:
     def to_db_tuple(self, test_id: int) -> tuple[Any, ...]:
         qualities = {
             self.pressure.quality.value,
-            self.low_flow.quality.value,
-            self.high_flow.quality.value,
+            self.flow.quality.value,
         }
         overall = (
             ReadingQuality.INVALID.value
             if ReadingQuality.INVALID.value in qualities
             else ReadingQuality.WARNING.value
             if ReadingQuality.WARNING.value in qualities
+            else ReadingQuality.MISSING.value
+            if ReadingQuality.MISSING.value in qualities
             else ReadingQuality.SIMULATED.value
             if self.simulated
             else ReadingQuality.VALID.value
@@ -49,11 +49,11 @@ class Measurement:
             self.device_timestamp_ms,
             self.pressure.current_ma,
             self.pressure.value,
-            self.low_flow.current_ma,
-            self.low_flow.value,
-            self.high_flow.current_ma,
-            self.high_flow.value,
-            self.active_flow_meter,
+            self.flow.current_ma,
+            self.flow.value,
+            None,  # coluna legada vazao_alta_ma
+            None,  # coluna legada vazao_alta
+            "unica",  # coluna legada flow_meter_ativo
             overall,
             self.communication_state,
             self.raw_message,
@@ -70,7 +70,6 @@ class TestDefinition:
     test_type: str = "Porosimetria"
     notes: str = ""
     expected_pressure_range: str = ""
-    primary_flow_meter: str = "Automático"
     pressure_unit: str = "bar"
     flow_unit: str = "L/min"
     acquisition_interval: float = 1.0

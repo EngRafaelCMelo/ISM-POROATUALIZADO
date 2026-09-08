@@ -21,8 +21,7 @@ class AlarmService:
         alarms: list[Alarm] = []
         mapping = {
             "pressao": measurement.pressure,
-            "vazao_baixa": measurement.low_flow,
-            "vazao_alta": measurement.high_flow,
+            "vazao": measurement.flow,
         }
         for sensor, reading in mapping.items():
             alarms.extend(self._sensor_alarms(sensor, reading, measurement.received_at))
@@ -55,6 +54,14 @@ class AlarmService:
                                     "Corrente acima da faixa nominal", current, 20.0))
         value = reading.value
         if value is None:
+            detail = f" ({reading.device_status})" if reading.device_status else ""
+            alarms.append(Alarm(
+                timestamp,
+                label,
+                Severity.CRITICAL,
+                "sensor",
+                f"Leitura ausente{detail}",
+            ))
             return alarms
         cfg = self.config[sensor]
         if value < float(cfg["limite_inferior"]) or value > float(cfg["limite_superior"]):

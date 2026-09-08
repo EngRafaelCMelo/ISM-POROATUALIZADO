@@ -26,9 +26,8 @@ class TestStatus(StrEnum):
     INVALID = "inválido"
 
 
-SENSOR_KEYS = ("pressao", "vazao_baixa", "vazao_alta")
+SENSOR_KEYS = ("pressao", "vazao")
 SENSOR_MA_KEYS = {
     "pressao": "pressao_ma",
-    "vazao_baixa": "vazao_baixa_ma",
-    "vazao_alta": "vazao_alta_ma",
+    "vazao": "vazao_ma",
 }

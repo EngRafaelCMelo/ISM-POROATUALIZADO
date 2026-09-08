@@ -2,14 +2,16 @@
 
 Aplicação desktop para monitorar e registrar ensaios de um porosímetro conectado a um ESP32 por USB serial. O sistema foi projetado para uso em laboratório: mantém as leituras visíveis em tempo real, grava cada amostra progressivamente em SQLite, detecta falhas, registra intervenções do operador e exporta o resultado do ensaio.
 
+O hardware atual possui exatamente um transdutor de pressão 4–20 mA, lido por
+um ADS1115, e um flow meter Modbus RTU, ligado ao ESP32 por um MAX3485.
+
 ## Funcionalidades
 
 - comunicação USB serial em thread separada, sem bloquear a interface;
 - detecção de portas, baud rate configurável, timeout e contadores de mensagens;
 - parser tolerante a campos opcionais e descarte seguro de JSON corrompido;
 - simulador integrado com ruído e falhas selecionáveis;
-- cartões de pressão, vazão baixa e vazão alta;
-- seleção automática de faixa com histerese;
+- cartões de pressão e vazão;
 - criação, pausa, retomada, marcações e finalização de ensaios;
 - gravação contínua em SQLite com WAL, transações e índices;
 - gráficos em tempo real, zoom, cursor, janelas temporais e exportação PNG;
@@ -57,13 +59,15 @@ Também é possível clicar duas vezes em `iniciar.bat` depois de criar o ambien
 ## Fluxo de uso
 
 1. Abra o programa.
-2. Escolha a porta do ESP32 e o baud rate, normalmente `115200`.
-3. Clique em **Conectar** e confirme que os sensores atualizam.
-4. Clique em **Iniciar ensaio**.
-5. Preencha a identificação da amostra e os dados operacionais.
-6. Acompanhe leituras, gráficos, faixa ativa e alarmes.
-7. Use **Adicionar marcação** para registrar uma intervenção ou ocorrência.
-8. Finalize o ensaio, acrescente a observação final e exporte o resultado.
+2. Escolha a porta do ESP32 e clique em **Conectar equipamento**.
+3. Clique em **Iniciar ensaio** e preencha os dados básicos e a geometria da amostra.
+4. Registre pelo menos três ciclos na tela **Calcular porosidade**.
+5. Finalize o ensaio. O relatório PDF é criado automaticamente.
+
+A tela inicial mostra a etapa atual desse fluxo e libera as ações no momento certo.
+Gráficos detalhados, calibração, configurações e diagnóstico permanecem disponíveis em
+**Mostrar opções avançadas**. O baud rate, o simulador e a injeção de falhas ficam em
+**Opções de conexão**, evitando controles técnicos durante o uso normal.
 
 ## Cálculos de porosimetria e permeabilidade
 
@@ -105,6 +109,11 @@ Como a picnometria de gás mede o volume esquelético acessível ao gás, a qual
 resultado depende da calibração dos volumes das câmaras, estabilidade térmica, ausência
 de vazamentos e repetição dos ciclos.
 
+Na tela **Ensaio**, o botão **Calcular porosidade** abre diretamente o procedimento
+guiado. Informe o volume geométrico manualmente ou através do comprimento e diâmetro,
+capture P0, P1 e P2 e registre pelo menos três ciclos. Um único ciclo ainda pode ser
+calculado para diagnóstico, mas não é apresentado como repetibilidade aprovada.
+
 Referências técnicas: [Micromeritics — gas pycnometry and density](https://micromeritics.com/density/),
 [Micromeritics — volume, density and porosity](https://micromeritics.com/resources/measuring-volume-density-and-porosity-of-tablets-for-coating-process-control-and-qc/)
 e [USGS — Darcy's law and permeability](https://pubs.usgs.gov/publication/70214996).
@@ -117,7 +126,7 @@ Clique em **Iniciar simulação** na faixa superior. A interface mostra um aviso
 
 O seletor ao lado permite demonstrar:
 
-- operação normal, pressão crescente e transição de faixa;
+- operação normal com pressão e vazão crescentes;
 - sensor desconectado;
 - corrente de 3,7 mA ou 3,2 mA;
 - corrente de 20,2 mA ou 21,0 mA;
@@ -125,21 +134,40 @@ O seletor ao lado permite demonstrar:
 
 Selecione novamente **Simulação normal** para recuperar a comunicação ou o sensor. O simulador não usa uma porta física.
 
+## Firmware e ligações do ESP32
+
+O firmware integrado está em
+`firmware_esp32_porosimetro/firmware_esp32_porosimetro.ino`. As ligações,
+bibliotecas e opções que precisam ser conferidas no manual do flow meter estão
+documentadas em `firmware_esp32_porosimetro/README.md`.
+
+Arquitetura do equipamento:
+
+```text
+Transdutor 4–20 mA -> resistor shunt -> ADS1115 -> I2C -> ESP32
+Flow meter          -> RS-485         -> MAX3485 -> UART2 -> ESP32
+ESP32                -> USB serial 115200         -> supervisório
+```
+
+O endereço do escravo, baud rate, paridade, registrador, tipo do registrador,
+formato numérico e escala do flow meter devem ser ajustados no início do
+firmware conforme a tabela Modbus do fabricante.
+
 ## Protocolo do ESP32
 
 O ESP32 deve transmitir um objeto JSON UTF-8 por linha. Cada mensagem deve terminar com `\n`.
 
-Mensagem completa:
+Mensagem completa enviada pelo firmware:
 
 ```json
 {
   "timestamp_ms": 152340,
-  "pressao_ma": 11.34,
-  "pressao": 3.42,
-  "vazao_baixa_ma": 7.26,
-  "vazao_baixa": 0.85,
-  "vazao_alta_ma": 14.08,
-  "vazao_alta": 12.60,
+  "sequence": 153,
+  "pressao_ma": 12.0,
+  "pressao": 50.0,
+  "pressao_status": "OK",
+  "vazao": 0.85,
+  "vazao_status": "OK",
   "status": "OK"
 }
 ```
@@ -147,10 +175,27 @@ Mensagem completa:
 Também é aceita uma mensagem reduzida:
 
 ```json
-{"pressao": 3.42, "vazao_baixa": 0.85, "vazao_alta": 12.60}
+{"pressao": 50.0, "vazao": 0.85}
 ```
 
+Se o medidor de vazão não responder, o firmware envia
+`"vazao": null` e o estado `PARCIAL_SEM_VAZAO`. O supervisório mostra a
+pressão normalmente e sinaliza que a vazão está pendente, sem substituir
+a leitura ausente por zero.
+
+Da mesma forma, uma falha no ADS1115 produz `"pressao": null` e o estado
+`PARCIAL_SEM_PRESSAO`. A tela de diagnóstico mostra `pressao_status` e
+`vazao_status`, e o sistema registra um alarme para a leitura ausente.
+
+Para compatibilidade com versões anteriores, `vazao_baixa` e
+`vazao_baixa_ma` também são aceitos como aliases de `vazao` e `vazao_ma`.
+
 Todos os campos são opcionais, mas a linha precisa conter pelo menos um campo de sensor. Campos numéricos inválidos fazem somente aquela mensagem ser descartada; a aplicação permanece aberta. Quando a corrente está disponível, o sistema calcula também o valor de engenharia para comparação.
+
+Na configuração padrão, `pressao_ma` é convertida e calibrada pelo
+supervisório. O campo `pressao` enviado pelo ESP32 é mantido na leitura bruta
+para diagnóstico e é usado como contingência caso a corrente não seja enviada.
+O flow meter já entrega `vazao` em L/min pelo protocolo Modbus.
 
 ## Conversão 4–20 mA e faixas
 
@@ -165,13 +210,14 @@ valor_calibrado = valor * ganho + offset
 
 As faixas iniciais ficam em `config/default_config.json`:
 
-- pressão: 0–10 bar;
-- vazão baixa: 0–5 L/min;
-- vazão alta: 0–50 L/min.
+- pressão: 0–100 bar, proveniente do sinal 4–20 mA;
+- vazão: 0–5 L/min, proveniente do medidor RS-485.
 
 Altere-as pela tela **Configurações > Sensores**. Reinicie o programa para recriar o parser e os cartões com as novas faixas. As alterações do operador são gravadas em `config/user_config.json`; o arquivo de padrões permanece intacto.
 
-No modo automático, o sensor de alta vazão passa a ser o principal em 90% da faixa baixa e o sistema retorna à faixa baixa abaixo de 75%. Os dois sensores continuam sendo registrados.
+O banco mantém algumas colunas legadas de baixa/alta vazão para abrir ensaios
+criados por versões anteriores. O equipamento atual utiliza somente a coluna
+de baixa vazão, apresentada na interface e nas exportações como **Vazão**.
 
 ## Banco de dados
 
@@ -201,13 +247,21 @@ Na tela **Histórico**, selecione um ensaio e escolha CSV, XLSX ou PDF. O servi�
 - PDF: identificação, resumo estatístico, alarmes, observações e assinatura;
 - PNG: captura do painel completo de gráficos.
 
+Ao finalizar um experimento, resultados calculados que ainda não foram salvos são
+gravados no ensaio e o relatório PDF final é gerado automaticamente no diretório
+escolhido ao criar o ensaio. Se um ensaio de porosidade ainda não tiver cálculo de
+Boyle, o programa avisa antes de finalizar e oferece voltar à tela de cálculos.
+O relatório inclui identificação, estatísticas, porosidade, volume de poros,
+volume e densidade esqueléticos, repetibilidade, alarmes e observações. Ele pode
+ser gerado novamente a qualquer momento em **Histórico > Exportar PDF**.
+
 ## Testes
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-Os testes cobrem parser, mensagens reduzidas e corrompidas, conversão 4–20 mA, ganho e offset, histerese, alarmes, calibração, criação/recuperação de ensaio, SQLite e CSV.
+Os testes cobrem parser, mensagens reduzidas e corrompidas, conversão 4–20 mA, ganho e offset, alarmes, calibração, criação/recuperação de ensaio, SQLite e exportações.
 
 ## Gerar o executável
 
@@ -221,7 +275,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 O resultado fica em:
 
 ```text
-dist\PorosimetroSupervisorio_v1_1_1\PorosimetroSupervisorio_v1_1_1.exe
+dist\PorosimetroSupervisorio_v1_5_0\PorosimetroSupervisorio_v1_5_0.exe
 ```
 
 O executável é criado sem console e inclui o estilo e a configuração padrão. Banco, configurações, logs e exportações ficam fora da pasta do programa para permitir escrita sem privilégios administrativos.
