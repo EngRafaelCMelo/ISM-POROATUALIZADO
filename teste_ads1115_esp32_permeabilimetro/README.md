@@ -5,7 +5,7 @@ analogicas do ADS1115.
 
 Este sketch é somente um diagnóstico de bancada e não envia o protocolo do
 supervisório. Para operar o equipamento com o MAX3485 e um único flow meter,
-use `../firmware_esp32_porosimetro/firmware_esp32_porosimetro.ino`.
+use `../firmware_esp32_permeabilimetro/firmware_esp32_permeabilimetro.ino`.
 
 ## Ligacoes
 

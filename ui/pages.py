@@ -790,27 +790,9 @@ class SettingsPage(QWidget):
         ads_notice.setObjectName("warningBanner"); ads_form.addRow(ads_notice)
         tabs.addTab(ads, "ADS1115")
 
-        calculations = QWidget()
-        calculation_form = QFormLayout(calculations)
-        self.calculation_sample_chamber = QDoubleSpinBox()
-        self.calculation_sample_chamber.setRange(0.00001, 1_000_000)
-        self.calculation_sample_chamber.setDecimals(5)
-        self.calculation_sample_chamber.setSuffix(" cm³")
-        self.calculation_sample_chamber.setValue(config["calculos"]["volume_camara_amostra_cm3"])
-        self.calculation_expansion_chamber = QDoubleSpinBox()
-        self.calculation_expansion_chamber.setRange(0.00001, 1_000_000)
-        self.calculation_expansion_chamber.setDecimals(5)
-        self.calculation_expansion_chamber.setSuffix(" cm³")
-        self.calculation_expansion_chamber.setValue(config["calculos"]["volume_expansao_cm3"])
-        self.calculation_repeatability = QDoubleSpinBox()
-        self.calculation_repeatability.setRange(0.001, 100)
-        self.calculation_repeatability.setDecimals(3)
-        self.calculation_repeatability.setSuffix(" %")
-        self.calculation_repeatability.setValue(config["calculos"]["limite_repetibilidade_percentual"])
-        calculation_form.addRow("Volume calibrado da câmara de amostra", self.calculation_sample_chamber)
-        calculation_form.addRow("Volume calibrado da câmara de expansão", self.calculation_expansion_chamber)
-        calculation_form.addRow("Limite do coeficiente de variação", self.calculation_repeatability)
-        tabs.addTab(calculations, "Cálculos")
+        calculation_notice = QLabel("A permeabilidade é calculada a partir da geometria da amostra, pressão, vazão, gás e viscosidade. Configure a pressão de saída na tela de cálculo.")
+        calculation_notice.setWordWrap(True)
+        tabs.addTab(calculation_notice, "Permeabilidade")
 
         data = QWidget()
         data_form = QFormLayout(data)
@@ -861,11 +843,7 @@ class SettingsPage(QWidget):
                 "separador_csv": self.separator.currentText(),
                 "backup_automatico": self.backup.isChecked(),
             },
-            "calculos": {
-                "volume_camara_amostra_cm3": self.calculation_sample_chamber.value(),
-                "volume_expansao_cm3": self.calculation_expansion_chamber.value(),
-                "limite_repetibilidade_percentual": self.calculation_repeatability.value(),
-            },
+            "calculos": self.config.get("calculos", {}),
         })
 
 
@@ -943,7 +921,7 @@ class AboutPage(QWidget):
         ))
         logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         logo.setMinimumHeight(170)
-        title = QLabel("Supervisor de Porosímetro ISM")
+        title = QLabel("Supervisório ISM – Permeabilímetro")
         title.setObjectName("pageTitle")
         description = QLabel(
             "Sistema industrial de aquisição e análise para um transdutor de pressão 4–20 mA "

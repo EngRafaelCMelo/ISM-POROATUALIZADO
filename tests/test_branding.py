@@ -34,7 +34,7 @@ def test_windows_icon_contains_all_required_sizes() -> None:
 
 
 def test_pyinstaller_uses_local_branding_icon() -> None:
-    spec = Path("PorosimetroSupervisorio.spec").read_text(encoding="utf-8")
+    spec = Path("PermeabilimetroSupervisorio.spec").read_text(encoding="utf-8")
     assert "ism_app_icon.ico" in spec
     assert "assets/branding" in spec
     assert "C:\\Users" not in spec

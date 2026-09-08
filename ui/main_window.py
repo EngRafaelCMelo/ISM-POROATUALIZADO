@@ -94,7 +94,7 @@ class MainWindow(QMainWindow):
         self._refresh_ports()
         self._refresh_history()
         self._setup_timers()
-        self.setWindowTitle("Supervisor de Porosímetro")
+        self.setWindowTitle("Supervisório ISM – Permeabilímetro")
         self.resize(1500, 920)
         self.setMinimumSize(1180, 700)
 
@@ -117,7 +117,7 @@ class MainWindow(QMainWindow):
             82, 58, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
         ))
         brand.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        brand_name = QLabel("POROSÍMETRO SUPERVISÓRIO")
+        brand_name = QLabel("PERMEABILÍMETRO SUPERVISÓRIO")
         brand_name.setObjectName("brandName")
         side_layout.addWidget(brand)
         side_layout.addWidget(brand_name)
@@ -144,6 +144,7 @@ class MainWindow(QMainWindow):
             self.nav_buttons.append(button)
             self.nav_by_page[page_index] = button
         self.nav_buttons[0].setChecked(True)
+        self.advanced_nav_buttons: list[QPushButton] = []
         advanced = QLabel("FERRAMENTAS")
         advanced.setObjectName("sidebarCaption")
         side_layout.addWidget(advanced)
@@ -152,7 +153,7 @@ class MainWindow(QMainWindow):
             button.setIcon(QIcon(icon_path(icon))); button.setIconSize(QSize(19, 19))
             button.setCheckable(True); button.setAutoExclusive(True)
             button.clicked.connect(lambda _checked=False, i=page_index: self._navigate(i))
-            side_layout.addWidget(button); self.nav_buttons.append(button); self.nav_by_page[page_index] = button
+            side_layout.addWidget(button); self.nav_buttons.append(button); self.advanced_nav_buttons.append(button); self.nav_by_page[page_index] = button
         side_layout.addStretch()
         version = QLabel(f"Versão {self.config.get('aplicacao.versao', '1.0.0')}")
         version.setObjectName("sidebarVersion")
@@ -599,7 +600,7 @@ class MainWindow(QMainWindow):
             code=row["codigo"], sample_name=row["amostra_nome"],
             sample_identification=row["amostra_identificacao"] or "",
             operator=row["operador"], description=row["descricao"] or "",
-            test_type=row["tipo"] or "Porosimetria por gás", notes=row["observacoes"] or "",
+            test_type=row["tipo"] or "Permeabilidade", notes=row["observacoes"] or "",
             expected_pressure_range=row["faixa_pressao"] or "",
             pressure_unit=row["unidade_pressao"] or "bar",
             flow_unit=row["unidade_vazao"] or "L/min",

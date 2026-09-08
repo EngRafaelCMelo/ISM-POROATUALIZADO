@@ -77,13 +77,14 @@ class ProtocolParser:
         except (TypeError, ValueError) as exc:
             raise ProtocolError(f"Campo numérico inválido em {key}") from exc
         cfg = self.sensor_config[key]
+        lower, upper = cfg.get("limite_inferior"), cfg.get("limite_superior")
+        range_configured = lower is not None and upper is not None
         calculated = None
-        if current is not None:
+        if current is not None and range_configured:
             calculated = apply_gain_offset(
                 current_to_engineering(
                     current,
-                    float(cfg["limite_inferior"]),
-                    float(cfg["limite_superior"]),
+                    float(lower), float(upper),
                     float(cfg.get("corrente_min", 4.0)),
                     float(cfg.get("corrente_max", 20.0)),
                 ),
@@ -105,9 +106,8 @@ class ProtocolParser:
             and abs(device_value - calculated) > float(cfg.get("tolerancia", 0.0))
         ):
             quality = ReadingQuality.WARNING
-        quality = classify_value(
-            value, float(cfg["limite_inferior"]), float(cfg["limite_superior"]), quality
-        )
+        if range_configured:
+            quality = classify_value(value, float(lower), float(upper), quality)
         return SensorReading(
             value=value,
             current_ma=current,

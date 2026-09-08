@@ -67,7 +67,7 @@ class TestDefinition:
     sample_identification: str = ""
     operator: str = "Operador"
     description: str = ""
-    test_type: str = "Porosimetria"
+    test_type: str = "Permeabilidade"
     notes: str = ""
     expected_pressure_range: str = ""
     pressure_unit: str = "bar"

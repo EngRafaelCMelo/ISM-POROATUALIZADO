@@ -122,7 +122,7 @@ class ExportService:
             topMargin=16 * mm, bottomMargin=16 * mm,
         )
         story = [
-            Paragraph("Relatório Final de Ensaio — Porosímetro", styles["Title"]),
+            Paragraph("Relatório Final de Ensaio — Permeabilímetro ISM", styles["Title"]),
             Spacer(1, 8 * mm),
         ]
         details = [
@@ -160,19 +160,12 @@ class ExportService:
         ]))
         story.extend([stats_table, Spacer(1, 7 * mm)])
         if not calculations.empty:
-            story.append(Paragraph("Resultados de porosimetria e permeabilidade", styles["Heading2"]))
+            story.append(Paragraph("Resultados de permeabilidade", styles["Heading2"]))
             calculation_rows = [["Tipo", "Resultado principal"]]
             for _, calculation in calculations.iterrows():
                 result = json.loads(calculation["resultados_json"])
-                if calculation["tipo"] == "Lei de Boyle":
-                    principal = (
-                        f"Porosidade aberta: {self._format_result(result.get('porosity_mean_percent'), '%')}; "
-                        f"volume de poros: {self._format_result(result.get('pore_volume_mean_cm3'), 'cm³')}; "
-                        f"volume esquelético: {self._format_result(result.get('skeletal_volume_mean_cm3'), 'cm³')}; "
-                        f"densidade esquelética: {self._format_result(result.get('skeletal_density_g_cm3'), 'g/cm³')}; "
-                        f"CV: {self._format_result(result.get('coefficient_variation_percent'), '%')}; "
-                        f"ciclos: {result.get('valid_cycles', '—')}"
-                    )
+                if calculation["tipo"] == "Lei de Boyle":  # registro legado somente leitura
+                    principal = "Registro legado"
                 elif calculation["tipo"] == "Permeabilidade a gás":
                     principal = f"k={self._format_result(result.get('permeability_md'), 'mD')}"
                 else:
@@ -191,7 +184,7 @@ class ExportService:
             story.extend([calculation_table, Spacer(1, 7 * mm)])
         else:
             story.extend([
-                Paragraph("Resultados de porosimetria e permeabilidade", styles["Heading2"]),
+                Paragraph("Resultados de permeabilidade", styles["Heading2"]),
                 Paragraph("Nenhum cálculo foi salvo para este ensaio.", styles["BodyText"]),
                 Spacer(1, 7 * mm),
             ])

@@ -1,4 +1,4 @@
-# Firmware ESP32 do porosímetro
+# Firmware ESP32 do permeabilímetro
 
 Firmware de produção para exatamente dois instrumentos:
 

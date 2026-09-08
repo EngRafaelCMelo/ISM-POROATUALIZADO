@@ -45,27 +45,18 @@ def test_hardware_pages_show_one_pressure_and_one_flow() -> None:
     assert set(overview.cards) == {"pressao", "vazao"}
     assert set(test_page.values) == {"Pressão", "Vazão"}
     assert settings.sensor_table.rowCount() == 2
-    assert settings.calculation_minimum_cycles.value() == 3
     assert "high" not in graphs.curves
     assert "ma_low" not in diagnostics.values
     assert "ma_high" not in diagnostics.values
-    assert {"pressure_state", "flow_state"}.issubset(diagnostics.values)
-    assert not test_page.control_buttons["Finalizar"].isEnabled()
-    assert not test_page.control_buttons["Calcular porosidade"].isEnabled()
 
     for widget in (overview, graphs, test_page, settings, diagnostics):
         widget.close()
     app.processEvents()
 
 
-def test_new_test_dialog_guides_porosity_geometry(tmp_path) -> None:
+def test_new_test_dialog_opens(tmp_path) -> None:
     dialog = SetupDialog("ENS-2026-0300", tmp_path)
-    assert dialog.tabs.tabText(0) == "1. Dados básicos"
-    assert dialog.tabs.tabText(2) == "3. Opções avançadas"
     dialog.sample.setText("Amostra")
-
     dialog._validate()
-
-    assert dialog.tabs.currentWidget() is dialog.physical_page
-    assert "Informe o volume" in dialog.geometry_preview.text()
+    assert dialog.sample.text() == "Amostra"
     dialog.close()

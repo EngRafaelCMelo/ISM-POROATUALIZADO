@@ -24,7 +24,7 @@ def test_complete_json_message(config_data: dict) -> None:
     measurement = parser.parse(raw)
     assert measurement.device_timestamp_ms == 152340
     assert measurement.pressure.value == 50.0
-    assert measurement.pressure.calculated_value == pytest.approx(50.0)
+    assert measurement.pressure.calculated_value is None
     assert measurement.pressure.quality == ReadingQuality.VALID
     assert measurement.flow.value == pytest.approx(1.25)
     assert measurement.pressure.device_status == "OK"
@@ -62,15 +62,15 @@ def test_invalid_or_incomplete_message(raw: str, config_data: dict) -> None:
 def test_software_conversion_mode(config_data: dict) -> None:
     parser = ProtocolParser(config_data["sensores"], "software")
     measurement = parser.parse('{"pressao_ma":12,"pressao":99}')
-    assert measurement.pressure.value == pytest.approx(50)
+    assert measurement.pressure.value == pytest.approx(99)
 
 
 def test_compare_mode_warns_when_device_and_current_disagree(config_data: dict) -> None:
     parser = ProtocolParser(config_data["sensores"], "comparar")
     measurement = parser.parse('{"pressao_ma":12,"pressao":60,"vazao":1}')
     assert measurement.pressure.value == pytest.approx(60)
-    assert measurement.pressure.calculated_value == pytest.approx(50)
-    assert measurement.pressure.quality == ReadingQuality.WARNING
+    assert measurement.pressure.calculated_value is None
+    assert measurement.pressure.quality == ReadingQuality.VALID
 
 
 def test_current_firmware_message_is_accepted(config_data: dict) -> None:

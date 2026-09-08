@@ -20,7 +20,7 @@ class AppPaths:
     @classmethod
     def create(cls) -> "AppPaths":
         if getattr(sys, "frozen", False):
-            base = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "ISM" / "Porosimetro"
+            base = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "ISM" / "Permeabilimetro"
         else:
             base = Path(__file__).resolve().parents[1]
         paths = cls(
@@ -119,7 +119,24 @@ class ConfigManager:
     @property
     def database_path(self) -> Path:
         configured = self.get("dados.banco")
-        return Path(configured) if configured else self.paths.data / "porosimetro.db"
+        return Path(configured) if configured else self.paths.data / "permeabilimetro.db"
+
+    def migrate_legacy_database(self) -> Path | None:
+        """Copia, após checagem e backup, a base antiga sem jamais removê-la."""
+        legacy = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "ISM" / "Porosimetro" / "data" / "porosimetro.db"
+        target = self.database_path
+        if target.exists() or not legacy.exists():
+            return None
+        with sqlite3.connect(legacy) as source:
+            result = source.execute("PRAGMA integrity_check").fetchone()
+            if not result or result[0] != "ok":
+                raise OSError("Banco legado reprovado no PRAGMA integrity_check")
+            backup_dir = legacy.parent / "backups"; backup_dir.mkdir(exist_ok=True)
+            with sqlite3.connect(backup_dir / "porosimetro_pre_migracao.db") as backup:
+                source.backup(backup)
+            with sqlite3.connect(target) as destination:
+                source.backup(destination)
+        return target
 
     def backup_database(self) -> Path | None:
         source = self.database_path

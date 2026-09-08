@@ -61,7 +61,8 @@ class TestRepository:
         return TestSession(test_id, definition, TestStatus.RUNNING, now)
 
     def save_measurement(self, test_id: int, measurement: Measurement) -> int:
-        maximum_flow = measurement.flow.value
+        maximum_pressure = measurement.pressure.value if measurement.pressure.quality.value in ("valid", "warning", "simulated") else None
+        maximum_flow = measurement.flow.value if measurement.flow.quality.value in ("valid", "warning", "simulated") else None
         with self.db.transaction() as con:
             cur = con.execute(
                 """INSERT INTO medicoes(
@@ -83,8 +84,8 @@ class TestRepository:
                      ELSE vazao_maxima END
                    WHERE id = ?""",
                 (
-                    measurement.pressure.value, measurement.pressure.value,
-                    measurement.pressure.value, maximum_flow, maximum_flow, maximum_flow,
+                    maximum_pressure, maximum_pressure, maximum_pressure,
+                    maximum_flow, maximum_flow, maximum_flow,
                     test_id,
                 ),
             )
