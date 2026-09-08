@@ -2,7 +2,7 @@
 from pathlib import Path
 
 root = Path(SPECPATH)
-app_name = "PorosimetroSupervisorio_v2_0_0"
+app_name = "PermeabilimetroSupervisorio_v2_1_0"
 
 a = Analysis(
     [str(root / "app.py")],
@@ -10,10 +10,8 @@ a = Analysis(
     binaries=[],
     datas=[
         (str(root / "ui" / "styles.qss"), "ui"),
-        (str(root / "ui" / "icons"), "ui/icons"),
-        (str(root / "assets" / "branding"), "assets/branding"),
         (str(root / "config" / "default_config.json"), "config"),
-        (str(root / "config" / "flow_meter.example.json"), "config"),
+        (str(root / "assets" / "branding"), "assets/branding"),
     ],
     hiddenimports=["openpyxl", "reportlab", "pyqtgraph"],
     hookspath=[],

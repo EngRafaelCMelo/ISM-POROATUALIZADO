@@ -44,7 +44,7 @@ class TestService:
     def finish(self, final_note: str = "") -> TestSession:
         if not self.current:
             raise RuntimeError("Nenhum ensaio ativo")
-        self.tests.finish(self.current.id, final_note, self.elapsed_seconds())
+        self.tests.finish(self.current.id, final_note)
         self.current.status = TestStatus.FINISHED
         self.current.ended_at = datetime.now()
         result = self.current

@@ -22,7 +22,6 @@ class SimulatorWorker(QThread):
         self.communication_loss = False
         self._stop_event = threading.Event()
         self._started_at = 0.0
-        self._sequence = 0
 
     def run(self) -> None:
         self._started_at = time.monotonic()
@@ -34,38 +33,39 @@ class SimulatorWorker(QThread):
             self._stop_event.wait(self.interval_s)
         self.state_changed.emit(False, "Simulação interrompida")
 
-    def _sample(self, elapsed: float) -> dict[str, object]:
+    def _sample(self, elapsed: float) -> dict[str, float | int | str | None]:
         cycle = elapsed % 150
-        pressure = min(9.2, 0.08 * cycle) if cycle < 115 else max(0.3, 9.2 - 0.25 * (cycle - 115))
-        flow = min(50.0, pressure * 3.8)
-        pressure += random.gauss(0, self.noise)
-        flow += random.gauss(0, self.noise * 5)
+        pressure = (
+            min(92.0, 0.8 * cycle)
+            if cycle < 115
+            else max(3.0, 92.0 - 2.5 * (cycle - 115))
+        )
+        flow = min(5.0, pressure * 0.058)
+        pressure += random.gauss(0, self.noise * 10)
+        flow += random.gauss(0, self.noise)
 
         def to_ma(value: float, maximum: float) -> float:
             return 4.0 + max(0.0, value) / maximum * 16.0
 
-        pressure_ma = to_ma(pressure, 10.0)
-        flow_valid = True
+        pressure_ma = to_ma(pressure, 100.0)
         if self.current_fault == "abaixo":
-            flow_valid = False
+            pressure_ma = 3.7
         elif self.current_fault == "critico_baixo":
-            flow_valid = False
+            pressure_ma = 3.2
         elif self.current_fault == "acima":
-            flow_valid = False
+            pressure_ma = 20.2
         elif self.current_fault == "critico_alto":
-            flow_valid = False
+            pressure_ma = 21.0
         if self.sensor_disconnected:
             pressure_ma = None
             pressure = None
-        result = {
-            "schema_version": 1, "sequence": self._sequence, "uptime_ms": int(elapsed * 1000),
-            "pressao": {"ads_raw": None, "voltage_v": None, "current_ma": pressure_ma, "value": pressure, "unit": "bar", "valid": pressure is not None},
-            "vazao": {"raw_register": round(flow * 10), "value": flow, "unit": "L/min", "valid": flow_valid},
-            "status": "OK", "alarms": [] if flow_valid else ["SIM_FLOW_FAULT"],
-            "firmware_version": "simulador-2.0.0",
+        return {
+            "timestamp_ms": int(elapsed * 1000),
+            "pressao_ma": pressure_ma,
+            "pressao": pressure,
+            "vazao": flow,
+            "status": "SIMULADO",
         }
-        self._sequence += 1
-        return result
 
     def stop(self) -> None:
         self._stop_event.set()

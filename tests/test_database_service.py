@@ -16,8 +16,8 @@ from services.test_service import TestService as Service
 def measurement() -> Measurement:
     return Measurement(
         received_at=datetime.now(),
-        pressure=SensorReading(value=2.0, current_ma=7.2, quality=ReadingQuality.VALID, valid=True),
-        flow=SensorReading(value=10.0, quality=ReadingQuality.VALID, valid=True),
+        pressure=SensorReading(2.0, 7.2, ReadingQuality.VALID),
+        flow=SensorReading(1.0, None, ReadingQuality.VALID),
     )
 
 
@@ -34,8 +34,11 @@ def test_create_record_and_finish_test(tmp_path) -> None:
     assert finished.status == Status.FINISHED
     stored = repository.get(finished.id)
     assert stored["quantidade_amostras"] == 1
-    assert stored["pressao_maxima"] == 2.0
-    assert len(repository.measurements(finished.id)) == 1
+    assert stored["pressao_maxima"] is None
+    measurements = repository.measurements(finished.id)
+    assert len(measurements) == 1
+    assert measurements[0]["vazao_alta"] is None
+    assert measurements[0]["flow_meter_ativo"] == "unica"
 
 
 def test_recover_interrupted_test(tmp_path) -> None:
@@ -62,9 +65,9 @@ def test_physical_parameters_and_calculation_are_persisted(tmp_path) -> None:
     assert stored["tipo_gas"] == "Helio"
     calculations = CalculationRepository(database)
     calculations.save(
-        session.id, "Lei de Boyle", {"p1": 2.0, "p2": 1.2},
-        {"porosity_mean_percent": 18.5}, "Três ciclos estáveis",
+        session.id, "Permeabilidade a gás", {"flow_l_min": 2.0},
+        {"permeability_md": 18.5}, "Condição estável",
     )
     saved = calculations.list(session.id)
     assert len(saved) == 1
-    assert saved[0]["tipo"] == "Lei de Boyle"
+    assert saved[0]["tipo"] == "Permeabilidade a gás"

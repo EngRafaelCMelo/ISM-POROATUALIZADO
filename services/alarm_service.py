@@ -54,6 +54,14 @@ class AlarmService:
                                     "Corrente acima da faixa nominal", current, 20.0))
         value = reading.value
         if value is None:
+            detail = f" ({reading.device_status})" if reading.device_status else ""
+            alarms.append(Alarm(
+                timestamp,
+                label,
+                Severity.CRITICAL,
+                "sensor",
+                f"Leitura ausente{detail}",
+            ))
             return alarms
         cfg = self.config[sensor]
         lower, upper = cfg.get("limite_inferior"), cfg.get("limite_superior")

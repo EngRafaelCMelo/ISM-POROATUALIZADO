@@ -22,7 +22,7 @@ def test_export_csv(tmp_path) -> None:
         Measurement(
             datetime.now(),
             pressure=SensorReading(2, 7.2, ReadingQuality.VALID),
-            flow=SensorReading(value=10, quality=ReadingQuality.VALID, valid=True),
+            flow=SensorReading(1, None, ReadingQuality.VALID),
         ),
     )
     target = ExportService(tests, events).export_csv(session.id, tmp_path / "exports")
@@ -43,13 +43,13 @@ def test_export_xlsx_json_and_pdf(tmp_path) -> None:
         Measurement(
             datetime.now(),
             pressure=SensorReading(4, 10.4, ReadingQuality.VALID),
-            flow=SensorReading(value=20, quality=ReadingQuality.VALID, valid=True),
+            flow=SensorReading(2, None, ReadingQuality.VALID),
         ),
     )
     tests.finish(session.id, "Ensaio de validação")
     CalculationRepository(database).save(
-        session.id, "Lei de Boyle", {"gas": "Helio"},
-        {"skeletal_volume_mean_cm3": 20.0, "porosity_mean_percent": 20.0},
+        session.id, "Permeabilidade a gás", {"gas": "Helio"},
+        {"permeability_md": 20.0},
     )
     service = ExportService(tests, events)
     xlsx = service.export_xlsx(session.id, tmp_path / "exports")
@@ -58,7 +58,13 @@ def test_export_xlsx_json_and_pdf(tmp_path) -> None:
     assert xlsx.exists() and xlsx.stat().st_size > 0
     assert json_file.exists() and '"medicoes"' in json_file.read_text(encoding="utf-8")
     assert '"calculos"' in json_file.read_text(encoding="utf-8")
+    exported_json = json_file.read_text(encoding="utf-8")
+    assert '"vazao"' in exported_json
+    assert '"vazao_alta"' not in exported_json
     assert pdf.exists() and pdf.stat().st_size > 500
     assert {"Resumo", "Medições", "Alarmes", "Marcações", "Calibração", "Cálculos"} == set(
         pd.ExcelFile(xlsx).sheet_names
     )
+    measurement_columns = pd.read_excel(xlsx, sheet_name="Medições").columns
+    assert "vazao" in measurement_columns
+    assert "vazao_alta" not in measurement_columns

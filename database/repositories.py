@@ -41,9 +41,8 @@ class TestRepository:
                     diretorio_exportacao, inicio, status,
                     comprimento_amostra_mm, diametro_amostra_mm, massa_amostra_g,
                     volume_geometrico_cm3, tipo_gas, temperatura_c,
-                    pressao_atmosferica_kpa, referencia_pressao, configuracao_json,
-                    versao_firmware, simulado
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    pressao_atmosferica_kpa, referencia_pressao
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     definition.code, sample_id, definition.sample_name,
                     definition.sample_identification, definition.operator,
@@ -56,25 +55,21 @@ class TestRepository:
                     definition.sample_mass_g, definition.bulk_volume_cm3,
                     definition.gas_type, definition.temperature_c,
                     definition.atmospheric_pressure_kpa, definition.pressure_reference,
-                    definition.configuration_snapshot, definition.firmware_version,
-                    int(definition.simulated),
                 ),
             )
             test_id = int(cur.lastrowid)
         return TestSession(test_id, definition, TestStatus.RUNNING, now)
 
     def save_measurement(self, test_id: int, measurement: Measurement) -> int:
-        maximum_pressure = measurement.pressure.value if measurement.pressure.valid else None
-        maximum_flow = measurement.flow.value if measurement.flow.valid else None
+        maximum_pressure = measurement.pressure.value if measurement.pressure.quality.value in ("valid", "warning", "simulated") else None
+        maximum_flow = measurement.flow.value if measurement.flow.quality.value in ("valid", "warning", "simulated") else None
         with self.db.transaction() as con:
             cur = con.execute(
                 """INSERT INTO medicoes(
                     ensaio_id, timestamp_computador, timestamp_esp32, pressao_ma,
-                    pressao, pressao_ads_raw, unidade_pressao, pressao_valida,
-                    vazao_raw, vazao, unidade_vazao, vazao_valida, sequencia,
-                    versao_schema, versao_firmware, simulado, qualidade,
-                    estado_comunicacao, mensagem_original
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    pressao, vazao_baixa_ma, vazao_baixa, vazao_alta_ma, vazao_alta,
+                    flow_meter_ativo, qualidade, estado_comunicacao, mensagem_original
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 measurement.to_db_tuple(test_id),
             )
             con.execute(
@@ -100,13 +95,13 @@ class TestRepository:
         with self.db.transaction() as con:
             con.execute("UPDATE ensaios SET status=? WHERE id=?", (status.value, test_id))
 
-    def finish(self, test_id: int, final_note: str = "", duration_seconds: float | None = None) -> None:
+    def finish(self, test_id: int, final_note: str = "") -> None:
         now = datetime.now()
         with self.db.transaction() as con:
             row = con.execute("SELECT inicio FROM ensaios WHERE id=?", (test_id,)).fetchone()
             if not row:
                 raise ValueError("Ensaio não encontrado")
-            duration = duration_seconds if duration_seconds is not None else (now - datetime.fromisoformat(row["inicio"])).total_seconds()
+            duration = (now - datetime.fromisoformat(row["inicio"])).total_seconds()
             con.execute(
                 """UPDATE ensaios SET status=?, fim=?, duracao_segundos=?,
                    observacao_final=? WHERE id=?""",

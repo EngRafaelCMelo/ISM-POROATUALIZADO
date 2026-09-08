@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.models import TestDefinition
-from core.porosimetry import GAS_PROPERTIES, cylindrical_volume_cm3
+from core.permeability import GAS_PROPERTIES, cylindrical_volume_cm3
 
 
 def physical_spin(suffix: str, maximum: float = 1_000_000.0, decimals: int = 4) -> QDoubleSpinBox:
@@ -50,7 +50,7 @@ class TestSetupDialog(QDialog):
         self.description = QTextEdit()
         self.description.setMaximumHeight(65)
         self.test_type = QComboBox()
-        self.test_type.addItems(["Porosimetria por gás", "Permeabilidade", "Porosidade e permeabilidade"])
+        self.test_type.addItems(["Permeabilidade"])
         self.notes = QTextEdit()
         self.notes.setMaximumHeight(65)
         self.expected_range = QLineEdit()
@@ -84,7 +84,7 @@ class TestSetupDialog(QDialog):
         physical_page = QWidget()
         physical_form = QFormLayout(physical_page)
         information = QLabel(
-            "Estes dados alimentam os cálculos de Boyle, porosidade, densidade e permeabilidade. "
+            "Estes dados alimentam o cálculo de permeabilidade e a correção de Klinkenberg. "
             "Podem ser completados ou ajustados posteriormente na tela Cálculos."
         )
         information.setWordWrap(True)

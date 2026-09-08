@@ -44,5 +44,5 @@ def test_settings_expose_all_technical_groups(tmp_path) -> None:
     assert window.settings.tabs.tabPosition() == QTabWidget.TabPosition.North
     assert window.settings.tabs.count() >= 6
     labels = [window.settings.tabs.tabText(index) for index in range(window.settings.tabs.count())]
-    assert {"Conexão", "Transdutor", "Modbus", "ADS1115", "Cálculos", "Dados"}.issubset(labels)
+    assert {"Conexão", "Transdutor", "Modbus", "ADS1115", "Permeabilidade", "Dados"}.issubset(labels)
     window.close()
