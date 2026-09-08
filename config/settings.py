@@ -40,17 +40,51 @@ class ConfigManager:
         self.paths = paths
         self.default_path = Path(__file__).with_name("default_config.json")
         self.user_path = paths.config / "user_config.json"
+        self._migration_required = False
         self.data = self._load()
+        if self._migration_required:
+            self.save()
 
     def _load(self) -> dict[str, Any]:
         with self.default_path.open(encoding="utf-8") as handle:
             default = json.load(handle)
+        legacy_three_sensor_config = False
         if self.user_path.exists():
             try:
                 with self.user_path.open(encoding="utf-8") as handle:
-                    self._deep_update(default, json.load(handle))
+                    user_config = json.load(handle)
+                user_sensors = user_config.get("sensores", {})
+                legacy_three_sensor_config = "vazao_alta" in user_sensors
+                self._migration_required = bool(
+                    {"vazao_baixa", "vazao_alta"}.intersection(user_sensors)
+                    or "flow_meter" in user_config
+                )
+                if "vazao" not in user_sensors and "vazao_baixa" in user_sensors:
+                    user_sensors["vazao"] = user_sensors["vazao_baixa"]
+                user_sensors.pop("vazao_baixa", None)
+                user_sensors.pop("vazao_alta", None)
+                user_config.pop("flow_meter", None)
+                self._deep_update(default, user_config)
             except (OSError, json.JSONDecodeError):
                 pass
+        sensors = default["sensores"]
+        if legacy_three_sensor_config:
+            # Migra configuracoes gravadas por versoes que esperavam tres
+            # sinais. O hardware atual usa uma pressão via ADS1115 e uma vazão
+            # via MAX3485/RS-485.
+            sensors["pressao"].update({
+                "limite_inferior": 0.0,
+                "limite_superior": 100.0,
+                "alerta": 90.0,
+                "critico": 100.0,
+            })
+            sensors["vazao"].update({
+                "nome": "Vazão",
+                "limite_inferior": 0.0,
+                "limite_superior": 5.0,
+                "alerta": 4.5,
+                "critico": 5.0,
+            })
         return default
 
     @staticmethod

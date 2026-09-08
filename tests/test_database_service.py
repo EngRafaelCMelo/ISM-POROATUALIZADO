@@ -16,8 +16,8 @@ from services.test_service import TestService as Service
 def measurement() -> Measurement:
     return Measurement(
         received_at=datetime.now(),
-        pressure=SensorReading(value=2.0, current_ma=7.2, quality=ReadingQuality.VALID, valid=True),
-        flow=SensorReading(value=10.0, quality=ReadingQuality.VALID, valid=True),
+        pressure=SensorReading(2.0, 7.2, ReadingQuality.VALID),
+        flow=SensorReading(1.0, None, ReadingQuality.VALID),
     )
 
 
@@ -35,7 +35,10 @@ def test_create_record_and_finish_test(tmp_path) -> None:
     stored = repository.get(finished.id)
     assert stored["quantidade_amostras"] == 1
     assert stored["pressao_maxima"] == 2.0
-    assert len(repository.measurements(finished.id)) == 1
+    measurements = repository.measurements(finished.id)
+    assert len(measurements) == 1
+    assert measurements[0]["vazao_alta"] is None
+    assert measurements[0]["flow_meter_ativo"] == "unica"
 
 
 def test_recover_interrupted_test(tmp_path) -> None:

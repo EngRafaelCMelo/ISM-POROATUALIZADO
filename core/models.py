@@ -14,9 +14,7 @@ class SensorReading:
     quality: ReadingQuality = ReadingQuality.MISSING
     device_value: float | None = None
     calculated_value: float | None = None
-    unit: str = ""
-    valid: bool = False
-    raw_value: float | int | None = None
+    device_status: str = ""
 
 
 @dataclass(slots=True)
@@ -28,11 +26,6 @@ class Measurement:
     communication_state: str = "conectado"
     raw_message: str = ""
     simulated: bool = False
-    schema_version: int = 1
-    sequence: int | None = None
-    uptime_ms: int | None = None
-    alarms: tuple[str, ...] = ()
-    firmware_version: str = ""
 
     def to_db_tuple(self, test_id: int) -> tuple[Any, ...]:
         qualities = {
@@ -44,6 +37,8 @@ class Measurement:
             if ReadingQuality.INVALID.value in qualities
             else ReadingQuality.WARNING.value
             if ReadingQuality.WARNING.value in qualities
+            else ReadingQuality.MISSING.value
+            if ReadingQuality.MISSING.value in qualities
             else ReadingQuality.SIMULATED.value
             if self.simulated
             else ReadingQuality.VALID.value
@@ -51,20 +46,14 @@ class Measurement:
         return (
             test_id,
             self.received_at.isoformat(timespec="milliseconds"),
-            self.uptime_ms if self.uptime_ms is not None else self.device_timestamp_ms,
+            self.device_timestamp_ms,
             self.pressure.current_ma,
             self.pressure.value,
-            self.pressure.raw_value,
-            self.pressure.unit,
-            int(self.pressure.valid),
-            self.flow.raw_value,
+            self.flow.current_ma,
             self.flow.value,
-            self.flow.unit,
-            int(self.flow.valid),
-            self.sequence,
-            self.schema_version,
-            self.firmware_version,
-            int(self.simulated),
+            None,  # coluna legada vazao_alta_ma
+            None,  # coluna legada vazao_alta
+            "unica",  # coluna legada flow_meter_ativo
             overall,
             self.communication_state,
             self.raw_message,
@@ -93,9 +82,6 @@ class TestDefinition:
     temperature_c: float = 20.0
     atmospheric_pressure_kpa: float = 101.325
     pressure_reference: str = "manometrica"
-    configuration_snapshot: str = ""
-    firmware_version: str = ""
-    simulated: bool = False
 
 
 @dataclass(slots=True)

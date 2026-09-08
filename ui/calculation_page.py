@@ -69,12 +69,16 @@ class CalculationPage(QWidget):
         self.last_boyle: tuple[dict, dict] | None = None
         self.last_permeability: tuple[dict, dict] | None = None
         self.last_klinkenberg: tuple[dict, dict] | None = None
+        self._dirty_results: set[str] = set()
+        self.minimum_boyle_cycles = int(
+            config["calculos"].get("minimo_ciclos_boyle", 3)
+        )
 
         root = QVBoxLayout(self)
-        title = QLabel("Cálculos")
+        title = QLabel("Calcular porosidade")
         title.setObjectName("pageTitle")
         subtitle = QLabel(
-            "Porosimetria por expansão de gás, propriedades da amostra e permeabilidade"
+            "Procedimento guiado por expansão de gás; recursos de permeabilidade ficam na segunda aba"
         )
         subtitle.setObjectName("muted")
         root.addWidget(title)
@@ -83,9 +87,16 @@ class CalculationPage(QWidget):
         self.test_banner = QLabel("Nenhum ensaio ativo — cálculos podem ser simulados, mas não salvos")
         self.test_banner.setObjectName("simulationBanner")
         root.addWidget(self.test_banner)
+        workflow = QLabel(
+            "Porosidade: 1) informe a geometria da amostra; 2) capture P0, P1 e P2; "
+            "3) adicione pelo menos três ciclos; 4) calcule e salve o resultado."
+        )
+        workflow.setWordWrap(True)
+        workflow.setObjectName("muted")
+        root.addWidget(workflow)
 
         sample_card, sample_layout = card()
-        sample_title = QLabel("Amostra, gás e referência")
+        sample_title = QLabel("Dados usados no cálculo")
         sample_title.setObjectName("sectionTitle")
         sample_layout.addWidget(sample_title)
         sample_grid = QGridLayout()
@@ -106,14 +117,14 @@ class CalculationPage(QWidget):
         self.pressure_reference.addItem("Manométrica", "manometrica")
         self.pressure_reference.addItem("Absoluta", "absoluta")
         self.current_pressure = QLabel("Pressão atual: —")
-        self.current_flow = QLabel("Vazão ativa: —")
+        self.current_flow = QLabel("Vazão atual: —")
         for index, (label, widget) in enumerate([
             ("Comprimento L", self.length), ("Diâmetro D", self.diameter),
             ("Massa seca", self.mass), ("Volume geométrico", self.bulk_volume),
             ("Gás", self.gas), ("Temperatura", self.temperature),
             ("Pressão atmosférica", self.atmospheric), ("Unidade de entrada", self.pressure_unit),
             ("Referência", self.pressure_reference), ("Leitura", self.current_pressure),
-            ("Flow meter", self.current_flow),
+            ("Leitura de vazão", self.current_flow),
         ]):
             row, column = divmod(index, 3)
             box = QVBoxLayout()
@@ -126,8 +137,8 @@ class CalculationPage(QWidget):
         root.addWidget(sample_card)
 
         self.tabs = QTabWidget()
-        self.tabs.addTab(self._build_boyle_tab(), "Lei de Boyle")
-        self.tabs.addTab(self._build_permeability_tab(), "Permeabilidade e Klinkenberg")
+        self.tabs.addTab(self._build_boyle_tab(), "Porosidade (Lei de Boyle)")
+        self.tabs.addTab(self._build_permeability_tab(), "Permeabilidade")
         self.tabs.addTab(self._build_history_tab(), "Resultados salvos")
         root.addWidget(self.tabs, 1)
         self.gas.currentIndexChanged.connect(self._apply_gas)
@@ -153,10 +164,18 @@ class CalculationPage(QWidget):
             field.setValue(1.0)
         form.addRow("Volume da câmara de amostra", self.sample_chamber)
         form.addRow("Volume da câmara de expansão", self.expansion_chamber)
-        form.addRow("P0 — expansão antes da abertura", self.p0)
-        form.addRow("P1 — amostra antes da abertura", self.p1)
-        form.addRow("P2 — equilíbrio após expansão", self.p2)
-        form.addRow("Z0 / Z1 / Z2", self._triple_widget(self.z0, self.z1, self.z2))
+        form.addRow("P0 — câmara vazia antes de abrir", self.p0)
+        form.addRow("P1 — amostra pressurizada antes de abrir", self.p1)
+        form.addRow("P2 — pressão estabilizada depois de abrir", self.p2)
+        self.z_widget = self._triple_widget(self.z0, self.z1, self.z2)
+        self.z_widget.hide()
+        self.z_toggle = QPushButton("Mostrar correções avançadas Z")
+        self.z_toggle.setCheckable(True)
+        self.z_toggle.toggled.connect(self._toggle_z_fields)
+        form.addRow(self.z_toggle)
+        self.z_label = QLabel("Z0 / Z1 / Z2")
+        self.z_label.hide()
+        form.addRow(self.z_label, self.z_widget)
         input_layout.addLayout(form)
         capture = QHBoxLayout()
         for text, field in [("Capturar P0", self.p0), ("Capturar P1", self.p1), ("Capturar P2", self.p2)]:
@@ -165,21 +184,26 @@ class CalculationPage(QWidget):
             capture.addWidget(button)
         input_layout.addLayout(capture)
         cycle_actions = QHBoxLayout()
-        add_cycle = QPushButton("Adicionar ciclo P1/P2")
+        add_cycle = QPushButton("Registrar ciclo P1/P2")
         add_cycle.clicked.connect(self._add_boyle_cycle)
         remove_cycle = QPushButton("Remover ciclo")
         remove_cycle.clicked.connect(self._remove_boyle_cycle)
         cycle_actions.addWidget(add_cycle)
         cycle_actions.addWidget(remove_cycle)
         input_layout.addLayout(cycle_actions)
+        self.cycle_hint = QLabel(
+            f"0 ciclos registrados · recomendado: {self.minimum_boyle_cycles}"
+        )
+        self.cycle_hint.setObjectName("muted")
+        input_layout.addWidget(self.cycle_hint)
         self.boyle_cycles = QTableWidget(0, 2)
         self.boyle_cycles.setHorizontalHeaderLabels(["P1", "P2"])
         self.boyle_cycles.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         input_layout.addWidget(self.boyle_cycles)
-        calculate = QPushButton("Calcular por Lei de Boyle")
-        calculate.setObjectName("primary")
-        calculate.clicked.connect(self._calculate_boyle)
-        input_layout.addWidget(calculate)
+        self.calculate_boyle_button = QPushButton("Calcular porosidade")
+        self.calculate_boyle_button.setObjectName("primary")
+        self.calculate_boyle_button.clicked.connect(self._calculate_boyle)
+        input_layout.addWidget(self.calculate_boyle_button)
         layout.addWidget(inputs, 1)
 
         results, result_layout = card()
@@ -198,9 +222,10 @@ class CalculationPage(QWidget):
         self.boyle_notes.setPlaceholderText("Observações sobre estabilização, ciclos descartados ou condições do ensaio")
         self.boyle_notes.setMaximumHeight(75)
         result_layout.addWidget(self.boyle_notes)
-        save = QPushButton("Salvar resultado no ensaio")
-        save.clicked.connect(self._save_boyle)
-        result_layout.addWidget(save)
+        self.save_boyle_button = QPushButton("Salvar resultado no ensaio")
+        self.save_boyle_button.setEnabled(False)
+        self.save_boyle_button.clicked.connect(self._save_boyle)
+        result_layout.addWidget(self.save_boyle_button)
         layout.addWidget(results, 1)
         return page
 
@@ -242,9 +267,10 @@ class CalculationPage(QWidget):
         self.permeability_result.setHorizontalHeaderLabels(["Grandeza", "Resultado"])
         self.permeability_result.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         permeability_layout.addWidget(self.permeability_result)
-        save = QPushButton("Salvar permeabilidade")
-        save.clicked.connect(self._save_permeability)
-        permeability_layout.addWidget(save)
+        self.save_permeability_button = QPushButton("Salvar permeabilidade")
+        self.save_permeability_button.setEnabled(False)
+        self.save_permeability_button.clicked.connect(self._save_permeability)
+        permeability_layout.addWidget(self.save_permeability_button)
         layout.addWidget(permeability_card, 1)
 
         klink_card, klink_layout = card()
@@ -277,9 +303,10 @@ class CalculationPage(QWidget):
         self.klinkenberg_result.setHorizontalHeaderLabels(["Grandeza", "Resultado"])
         self.klinkenberg_result.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         klink_layout.addWidget(self.klinkenberg_result)
-        save_k = QPushButton("Salvar correção Klinkenberg")
-        save_k.clicked.connect(self._save_klinkenberg)
-        klink_layout.addWidget(save_k)
+        self.save_klinkenberg_button = QPushButton("Salvar correção Klinkenberg")
+        self.save_klinkenberg_button.setEnabled(False)
+        self.save_klinkenberg_button.clicked.connect(self._save_klinkenberg)
+        klink_layout.addWidget(self.save_klinkenberg_button)
         layout.addWidget(klink_card, 1)
         return page
 
@@ -301,14 +328,25 @@ class CalculationPage(QWidget):
             layout.addWidget(field)
         return widget
 
-    def set_session(self, definition: TestDefinition | None) -> None:
+    def set_session(self, definition: TestDefinition | None, context: str = "active") -> None:
+        previous_code = self.definition.code if self.definition else None
         self.definition = definition
-        self.test_banner.setText(
-            f"Ensaio ativo: {definition.code} — {definition.sample_name}"
-            if definition else "Nenhum ensaio ativo — cálculos podem ser simulados, mas não salvos"
-        )
+        if not definition:
+            self.test_banner.setText(
+                "Nenhum ensaio selecionado — inicie um ensaio ou abra um item do histórico"
+            )
+        elif context == "active":
+            self.test_banner.setText(
+                f"Ensaio ativo: {definition.code} — {definition.sample_name}"
+            )
+        else:
+            self.test_banner.setText(
+                f"Ensaio finalizado selecionado: {definition.code} — resultados podem ser revisados e salvos"
+            )
         if not definition:
             return
+        if previous_code != definition.code:
+            self._reset_results()
         for field, value in [
             (self.length, definition.sample_length_mm),
             (self.diameter, definition.sample_diameter_mm),
@@ -323,6 +361,29 @@ class CalculationPage(QWidget):
         self.pressure_reference.setCurrentIndex(max(0, index))
         gas_index = self.gas.findData(definition.gas_type)
         self.gas.setCurrentIndex(max(0, gas_index))
+        test_type = definition.test_type.lower()
+        self.tabs.setCurrentIndex(1 if "permeabilidade" in test_type and "poros" not in test_type else 0)
+
+    def _reset_results(self) -> None:
+        self.last_boyle = None
+        self.last_permeability = None
+        self.last_klinkenberg = None
+        self._dirty_results.clear()
+        for table in (
+            self.boyle_cycles,
+            self.boyle_result,
+            self.permeability_result,
+            self.klinkenberg_points,
+            self.klinkenberg_result,
+            self.history,
+        ):
+            table.setRowCount(0)
+        self.boyle_quality.setText("Aguardando cálculo")
+        self.boyle_quality.setObjectName("pillNeutral")
+        self.save_boyle_button.setEnabled(False)
+        self.save_permeability_button.setEnabled(False)
+        self.save_klinkenberg_button.setEnabled(False)
+        self._update_cycle_hint()
 
     def update_measurement(self, measurement: Measurement) -> None:
         self.current_measurement = measurement
@@ -332,24 +393,55 @@ class CalculationPage(QWidget):
         )
         flow_reading = measurement.flow
         self.current_flow.setText(
-            f"Vazão ativa: {flow_reading.value:.5f} L/min" if flow_reading.value is not None else "Vazão ativa: —"
+            f"Vazão atual: {flow_reading.value:.5f} L/min" if flow_reading.value is not None else "Vazão atual: —"
         )
 
     def _capture_pressure(self, field: QDoubleSpinBox) -> None:
         if self.current_measurement and self.current_measurement.pressure.value is not None:
             field.setValue(self.current_measurement.pressure.value)
+        else:
+            QMessageBox.information(
+                self,
+                "Aguardando pressão",
+                "Ainda não há uma leitura de pressão disponível. Conecte o ESP32 e aguarde a leitura aparecer.",
+            )
 
     def _capture_flow(self) -> None:
         if not self.current_measurement:
+            QMessageBox.information(
+                self,
+                "Aguardando vazão",
+                "Ainda não há dados do equipamento. Conecte o ESP32 e aguarde a primeira leitura.",
+            )
             return
         reading = self.current_measurement.flow
         if reading.value is not None:
             self.flow.setValue(reading.value)
+        else:
+            QMessageBox.information(
+                self,
+                "Aguardando vazão",
+                "Ainda não há uma leitura de vazão disponível. Verifique a comunicação RS-485 do flow meter.",
+            )
 
     def _apply_gas(self) -> None:
         properties = GAS_PROPERTIES[self.gas.currentData()]
         if hasattr(self, "viscosity"):
             self.viscosity.setValue(float(properties["viscosidade_upa_s"]))
+
+    def _toggle_z_fields(self, visible: bool) -> None:
+        self.z_widget.setVisible(visible)
+        self.z_label.setVisible(visible)
+        self.z_toggle.setText(
+            "Ocultar correções avançadas Z" if visible else "Mostrar correções avançadas Z"
+        )
+
+    def _update_cycle_hint(self) -> None:
+        count = self.boyle_cycles.rowCount()
+        self.cycle_hint.setText(
+            f"{count} ciclo{'s' if count != 1 else ''} registrado{'s' if count != 1 else ''} · "
+            f"recomendado: {self.minimum_boyle_cycles}"
+        )
 
     def _bulk_volume_value(self) -> float | None:
         if self.bulk_volume.value() > 0:
@@ -364,21 +456,44 @@ class CalculationPage(QWidget):
             self.atmospheric.value(),
         )
 
-    def _add_boyle_cycle(self) -> None:
+    def _add_boyle_cycle(self) -> bool:
+        try:
+            if not (
+                self._absolute(self.p1.value())
+                > self._absolute(self.p2.value())
+                > self._absolute(self.p0.value())
+            ):
+                raise ValueError("As pressões devem obedecer P1 > P2 > P0.")
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Ciclo incompleto",
+                f"Revise as pressões antes de registrar o ciclo.\n\n{exc}",
+            )
+            return False
         row = self.boyle_cycles.rowCount()
         self.boyle_cycles.insertRow(row)
         self.boyle_cycles.setItem(row, 0, QTableWidgetItem(f"{self.p1.value():.6g}"))
         self.boyle_cycles.setItem(row, 1, QTableWidgetItem(f"{self.p2.value():.6g}"))
+        self._update_cycle_hint()
+        return True
 
     def _remove_boyle_cycle(self) -> None:
         row = self.boyle_cycles.currentRow()
         if row >= 0:
             self.boyle_cycles.removeRow(row)
+            self._update_cycle_hint()
 
     def _calculate_boyle(self) -> None:
         try:
+            bulk_volume = self._bulk_volume_value()
+            if bulk_volume is None:
+                raise ValueError(
+                    "Informe o volume geométrico ou o comprimento e o diâmetro da amostra para calcular a porosidade."
+                )
             if self.boyle_cycles.rowCount() == 0:
-                self._add_boyle_cycle()
+                if not self._add_boyle_cycle():
+                    return
             cycles_input = [
                 (
                     float(self.boyle_cycles.item(row, 0).text()),
@@ -394,7 +509,7 @@ class CalculationPage(QWidget):
                     initial_sample_pressure_kpa_abs=self._absolute(p1),
                     equilibrium_pressure_kpa_abs=self._absolute(p2),
                     initial_expansion_pressure_kpa_abs=self._absolute(self.p0.value()),
-                    bulk_volume_cm3=self._bulk_volume_value(),
+                    bulk_volume_cm3=bulk_volume,
                     sample_mass_g=self.mass.value() or None,
                     temperature_initial_k=temperature_k,
                     temperature_equilibrium_k=temperature_k,
@@ -414,6 +529,8 @@ class CalculationPage(QWidget):
             }
             output = summary.as_dict()
             self.last_boyle = (inputs, output)
+            self._dirty_results.add("Lei de Boyle")
+            self.save_boyle_button.setEnabled(self.definition is not None)
             self._show_results(self.boyle_result, [
                 ("Ciclos válidos", str(summary.valid_cycles)),
                 ("Volume esquelético médio", self._fmt(summary.skeletal_volume_mean_cm3, "cm³")),
@@ -425,8 +542,18 @@ class CalculationPage(QWidget):
                 ("Densidade aparente", self._fmt(summary.bulk_density_g_cm3, "g/cm³")),
                 ("Fração sólida", self._fmt(summary.solid_fraction_percent, "%")),
             ])
-            self.boyle_quality.setText("Repetibilidade aprovada" if summary.repeatability_ok else "Repetibilidade acima do limite")
-            self.boyle_quality.setObjectName("pillGood" if summary.repeatability_ok else "pillWarn")
+            enough_cycles = summary.valid_cycles >= self.minimum_boyle_cycles
+            if not enough_cycles:
+                self.boyle_quality.setText(
+                    f"Adicione pelo menos {self.minimum_boyle_cycles} ciclos para avaliar a repetibilidade"
+                )
+            elif summary.repeatability_ok:
+                self.boyle_quality.setText("Repetibilidade aprovada")
+            else:
+                self.boyle_quality.setText("Repetibilidade acima do limite")
+            self.boyle_quality.setObjectName(
+                "pillGood" if enough_cycles and summary.repeatability_ok else "pillWarn"
+            )
             self.boyle_quality.style().unpolish(self.boyle_quality)
             self.boyle_quality.style().polish(self.boyle_quality)
         except (ValueError, TypeError, AttributeError) as exc:
@@ -449,6 +576,8 @@ class CalculationPage(QWidget):
             }
             output = result.as_dict()
             self.last_permeability = (inputs, output)
+            self._dirty_results.add("Permeabilidade a gás")
+            self.save_permeability_button.setEnabled(self.definition is not None)
             self._show_results(self.permeability_result, [
                 ("Permeabilidade", f"{result.permeability_m2:.6e} m²"),
                 ("Permeabilidade", f"{result.permeability_darcy:.6g} D"),
@@ -480,6 +609,8 @@ class CalculationPage(QWidget):
             inputs = self._common_inputs() | {"pontos_pressao_media_kpa_permeabilidade_md": points}
             output = result.as_dict()
             self.last_klinkenberg = (inputs, output)
+            self._dirty_results.add("Klinkenberg")
+            self.save_klinkenberg_button.setEnabled(self.definition is not None)
             self._show_results(self.klinkenberg_result, [
                 ("Permeabilidade intrínseca", self._fmt(result.intrinsic_permeability_md, "mD")),
                 ("Fator de deslizamento b", self._fmt(result.slip_factor_kpa, "kPa")),
@@ -524,6 +655,28 @@ class CalculationPage(QWidget):
     def _save_klinkenberg(self) -> None:
         if self.last_klinkenberg:
             self.save_requested.emit("Klinkenberg", *self.last_klinkenberg, "")
+
+    def pending_results(self) -> list[tuple[str, dict, dict, str]]:
+        candidates = [
+            ("Lei de Boyle", self.last_boyle, self.boyle_notes.toPlainText().strip()),
+            ("Permeabilidade a gás", self.last_permeability, ""),
+            ("Klinkenberg", self.last_klinkenberg, ""),
+        ]
+        return [
+            (calculation_type, result[0], result[1], notes)
+            for calculation_type, result, notes in candidates
+            if result is not None and calculation_type in self._dirty_results
+        ]
+
+    def mark_saved(self, calculation_type: str) -> None:
+        self._dirty_results.discard(calculation_type)
+        buttons = {
+            "Lei de Boyle": self.save_boyle_button,
+            "Permeabilidade a gás": self.save_permeability_button,
+            "Klinkenberg": self.save_klinkenberg_button,
+        }
+        if calculation_type in buttons:
+            buttons[calculation_type].setEnabled(False)
 
     def populate_history(self, rows: list[Any]) -> None:
         self.history.setRowCount(0)

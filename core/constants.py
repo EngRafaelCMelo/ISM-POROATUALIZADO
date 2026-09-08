@@ -27,4 +27,7 @@ class TestStatus(StrEnum):
 
 
 SENSOR_KEYS = ("pressao", "vazao")
-SERIAL_SCHEMA_VERSION = 1
+SENSOR_MA_KEYS = {
+    "pressao": "pressao_ma",
+    "vazao": "vazao_ma",
+}
