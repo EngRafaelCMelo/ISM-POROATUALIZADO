@@ -29,7 +29,7 @@ def test_three_sensor_user_config_is_migrated(tmp_path) -> None:
 
     config = ConfigManager(paths).data
 
-    assert config["sensores"]["pressao"]["limite_superior"] == 100.0
+    assert config["sensores"]["pressao"]["limite_superior"] == 10.0
     assert config["sensores"]["vazao"]["nome"] == "Vazão"
     assert "vazao_baixa" not in config["sensores"]
     assert "vazao_alta" not in config["sensores"]

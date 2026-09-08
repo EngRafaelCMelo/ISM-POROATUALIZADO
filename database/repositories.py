@@ -38,18 +38,19 @@ class TestRepository:
                     codigo, amostra_id, amostra_nome, amostra_identificacao, operador,
                     descricao, tipo, observacoes, faixa_pressao, flow_meter_principal,
                     unidade_pressao, unidade_vazao, intervalo_aquisicao,
-                    diretorio_exportacao, inicio, status,
+                    diretorio_exportacao, configuracao_json, versao_firmware, simulado, inicio, status,
                     comprimento_amostra_mm, diametro_amostra_mm, massa_amostra_g,
                     volume_geometrico_cm3, tipo_gas, temperatura_c,
                     pressao_atmosferica_kpa, referencia_pressao
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     definition.code, sample_id, definition.sample_name,
                     definition.sample_identification, definition.operator,
                     definition.description, definition.test_type, definition.notes,
                     definition.expected_pressure_range, "Único",
                     definition.pressure_unit, definition.flow_unit,
-                    definition.acquisition_interval, definition.export_directory,
+                    definition.acquisition_interval, definition.export_directory, definition.configuration_snapshot,
+                    definition.firmware_version, int(definition.simulated),
                     now.isoformat(), TestStatus.RUNNING.value,
                     definition.sample_length_mm, definition.sample_diameter_mm,
                     definition.sample_mass_g, definition.bulk_volume_cm3,
@@ -61,16 +62,21 @@ class TestRepository:
         return TestSession(test_id, definition, TestStatus.RUNNING, now)
 
     def save_measurement(self, test_id: int, measurement: Measurement) -> int:
-        maximum_pressure = measurement.pressure.value if measurement.pressure.quality.value in ("valid", "warning", "simulated") else None
-        maximum_flow = measurement.flow.value if measurement.flow.quality.value in ("valid", "warning", "simulated") else None
+        valid = {"válida", "atenção", "simulada"}
+        maximum_pressure = measurement.pressure.value if measurement.pressure.quality.value in valid else None
+        maximum_flow = measurement.flow.value if measurement.flow.quality.value in valid else None
         with self.db.transaction() as con:
             cur = con.execute(
                 """INSERT INTO medicoes(
-                    ensaio_id, timestamp_computador, timestamp_esp32, pressao_ma,
-                    pressao, vazao_baixa_ma, vazao_baixa, vazao_alta_ma, vazao_alta,
-                    flow_meter_ativo, qualidade, estado_comunicacao, mensagem_original
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                measurement.to_db_tuple(test_id),
+                    ensaio_id,timestamp_computador,timestamp_esp32,pressao_ma,pressao,
+                    unidade_pressao,pressao_valida,vazao_raw,vazao,unidade_vazao,vazao_valida,
+                    sequencia,versao_schema,versao_firmware,simulado,qualidade,estado_comunicacao,mensagem_original
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (test_id,measurement.received_at.isoformat(timespec="milliseconds"),measurement.device_timestamp_ms,
+                 measurement.pressure.current_ma,measurement.pressure.value,measurement.pressure.unit,int(bool(measurement.pressure.valid)),
+                 measurement.flow.device_value,measurement.flow.value,measurement.flow.unit,int(bool(measurement.flow.valid)),
+                 measurement.sequence,measurement.schema_version,measurement.firmware_version,int(measurement.simulated),
+                 measurement.pressure.quality.value if measurement.pressure.quality == measurement.flow.quality else "mista",measurement.communication_state,measurement.raw_message),
             )
             con.execute(
                 """UPDATE ensaios SET quantidade_amostras = quantidade_amostras + 1,
@@ -95,13 +101,13 @@ class TestRepository:
         with self.db.transaction() as con:
             con.execute("UPDATE ensaios SET status=? WHERE id=?", (status.value, test_id))
 
-    def finish(self, test_id: int, final_note: str = "") -> None:
+    def finish(self, test_id: int, final_note: str = "", duration_seconds: float | None = None) -> None:
         now = datetime.now()
         with self.db.transaction() as con:
             row = con.execute("SELECT inicio FROM ensaios WHERE id=?", (test_id,)).fetchone()
             if not row:
                 raise ValueError("Ensaio não encontrado")
-            duration = (now - datetime.fromisoformat(row["inicio"])).total_seconds()
+            duration = duration_seconds if duration_seconds is not None else (now - datetime.fromisoformat(row["inicio"])).total_seconds()
             con.execute(
                 """UPDATE ensaios SET status=?, fim=?, duracao_segundos=?,
                    observacao_final=? WHERE id=?""",

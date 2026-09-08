@@ -33,7 +33,7 @@ class SimulatorWorker(QThread):
             self._stop_event.wait(self.interval_s)
         self.state_changed.emit(False, "Simulação interrompida")
 
-    def _sample(self, elapsed: float) -> dict[str, float | int | str | None]:
+    def _sample(self, elapsed: float) -> dict:
         cycle = elapsed % 150
         pressure = (
             min(92.0, 0.8 * cycle)
@@ -59,11 +59,12 @@ class SimulatorWorker(QThread):
         if self.sensor_disconnected:
             pressure_ma = None
             pressure = None
+        pressure_valid = pressure_ma is not None and 3.6 <= pressure_ma <= 20.5
         return {
-            "timestamp_ms": int(elapsed * 1000),
-            "pressao_ma": pressure_ma,
-            "pressao": pressure,
-            "vazao": flow,
+            "schema_version": 1, "sequence": int(elapsed / self.interval_s),
+            "timestamp_ms": int(elapsed * 1000), "firmware_version": "simulator-1",
+            "pressao": {"value": pressure if pressure_valid else None, "unit": "bar", "valid": pressure_valid, "current_ma": pressure_ma},
+            "vazao": {"value": flow, "unit": "L/min", "valid": True},
             "status": "SIMULADO",
         }
 

@@ -34,11 +34,11 @@ def test_create_record_and_finish_test(tmp_path) -> None:
     assert finished.status == Status.FINISHED
     stored = repository.get(finished.id)
     assert stored["quantidade_amostras"] == 1
-    assert stored["pressao_maxima"] is None
+    assert stored["pressao_maxima"] == 2.0
     measurements = repository.measurements(finished.id)
     assert len(measurements) == 1
     assert measurements[0]["vazao_alta"] is None
-    assert measurements[0]["flow_meter_ativo"] == "unica"
+    assert measurements[0]["vazao"] == 1.0
 
 
 def test_recover_interrupted_test(tmp_path) -> None:

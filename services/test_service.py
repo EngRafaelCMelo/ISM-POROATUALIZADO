@@ -18,6 +18,7 @@ class TestService:
         if self.current and self.current.status in (TestStatus.RUNNING, TestStatus.PAUSED):
             raise RuntimeError("Já existe um ensaio ativo")
         self.current = self.tests.create(definition)
+        self._paused_at = None
         return self.current
 
     def record(self, measurement: Measurement) -> bool:
@@ -44,11 +45,15 @@ class TestService:
     def finish(self, final_note: str = "") -> TestSession:
         if not self.current:
             raise RuntimeError("Nenhum ensaio ativo")
-        self.tests.finish(self.current.id, final_note)
+        if self.current.status == TestStatus.PAUSED and self._paused_at:
+            self.current.paused_seconds += (datetime.now() - self._paused_at).total_seconds()
+            self._paused_at = None
+        self.tests.finish(self.current.id, final_note, self.elapsed_seconds())
         self.current.status = TestStatus.FINISHED
         self.current.ended_at = datetime.now()
         result = self.current
         self.current = None
+        self._paused_at = None
         return result
 
     def add_marker(self, category: str, comment: str) -> None:

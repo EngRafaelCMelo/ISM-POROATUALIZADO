@@ -15,6 +15,12 @@ class SensorReading:
     device_value: float | None = None
     calculated_value: float | None = None
     device_status: str = ""
+    unit: str = ""
+    valid: bool | None = None
+
+    def __post_init__(self) -> None:
+        if self.valid is None:
+            self.valid = self.quality not in (ReadingQuality.INVALID, ReadingQuality.MISSING)
 
 
 @dataclass(slots=True)
@@ -26,6 +32,9 @@ class Measurement:
     communication_state: str = "conectado"
     raw_message: str = ""
     simulated: bool = False
+    sequence: int | None = None
+    schema_version: int | None = None
+    firmware_version: str = ""
 
     def to_db_tuple(self, test_id: int) -> tuple[Any, ...]:
         qualities = {
@@ -82,6 +91,9 @@ class TestDefinition:
     temperature_c: float = 20.0
     atmospheric_pressure_kpa: float = 101.325
     pressure_reference: str = "manometrica"
+    configuration_snapshot: str = ""
+    firmware_version: str = ""
+    simulated: bool = False
 
 
 @dataclass(slots=True)

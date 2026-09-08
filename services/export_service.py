@@ -59,6 +59,13 @@ class ExportService:
             columns=[column for column in legacy if column in measurements],
             errors="ignore",
         ).copy()
+        # Bases antigas possuem vazao_baixa; bases novas já têm vazao canônica.
+        if "vazao" in current and "vazao_baixa" in current:
+            current["vazao"] = current["vazao"].combine_first(current["vazao_baixa"])
+            current = current.drop(columns=["vazao_baixa"])
+        if "vazao_ma" in current and "vazao_baixa_ma" in current:
+            current["vazao_ma"] = current["vazao_ma"].combine_first(current["vazao_baixa_ma"])
+            current = current.drop(columns=["vazao_baixa_ma"])
         return current.rename(columns={
             "vazao_baixa_ma": "vazao_ma",
             "vazao_baixa": "vazao",
