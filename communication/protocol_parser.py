@@ -37,6 +37,9 @@ class ProtocolParser:
             payload["vazao_status"] = payload["vazao_baixa_status"]
         if not any(key in payload for key in (*SENSOR_KEYS, *SENSOR_MA_KEYS.values())):
             raise ProtocolError("Nenhum campo de sensor reconhecido")
+        flowmeter_ok = payload.get("flowmeter_ok")
+        if flowmeter_ok is not None and not isinstance(flowmeter_ok, bool):
+            raise ProtocolError("flowmeter_ok deve ser booleano")
 
         readings = {
             key: self._reading(
@@ -58,6 +61,7 @@ class ProtocolParser:
             device_timestamp_ms=timestamp_ms,
             pressure=readings["pressao"],
             flow=readings["vazao"],
+            flowmeter_ok=flowmeter_ok,
             communication_state=str(payload.get("status", "OK")),
             raw_message=raw.strip(),
             simulated=simulated,

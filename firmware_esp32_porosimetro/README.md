@@ -13,7 +13,6 @@ O ESP32 envia uma linha JSON por segundo ao supervisório através da USB em
 Instale pela Arduino IDE:
 
 - **Adafruit ADS1X15**, da Adafruit;
-- **ModbusMaster**, de Doc Walker;
 - pacote de placas **esp32**, da Espressif Systems.
 
 ## Ligações do ADS1115
@@ -50,8 +49,7 @@ Em instalações industriais com terras diferentes, use isolamento apropriado.
 | GND | GND |
 | RO | GPIO 16 (RX2) |
 | DI | GPIO 17 (TX2) |
-| DE | GPIO 4 |
-| /RE | GPIO 4 |
+| DE / /RE | Não utilizado: módulo com direção automática |
 | A | A/RS-485 do medidor |
 | B | B/RS-485 do medidor |
 
@@ -67,10 +65,8 @@ Antes de gravar, ajuste no início do arquivo `.ino`:
 - `MODBUS_BAUD_RATE`;
 - `MODBUS_SERIAL_CONFIG` (`SERIAL_8N1`, `SERIAL_8E1`, etc.);
 - `REGISTRADOR_VAZAO`;
-- `REGISTRADOR_EH_INPUT`;
-- `TIPO_DADO_VAZAO`;
-- `INVERTER_ORDEM_WORDS` e `INVERTER_BYTES_NO_WORD`;
-- `ESCALA_VAZAO` e `OFFSET_VAZAO`.
+- função `0x03`, registradores `0x003A`–`0x003B`, `UINT32` big-endian e escala
+  `0,001 L/min` já estão fixos conforme o flowmeter validado.
 
 O endereço passado à biblioteca é baseado em zero. Por exemplo, o registrador
 40001 descrito no manual normalmente corresponde ao endereço `0`; confirme na
@@ -81,13 +77,13 @@ tabela Modbus do fabricante.
 Operação normal:
 
 ```json
-{"timestamp_ms":152340,"sequence":153,"pressao_ma":12.000,"pressao":50.000,"pressao_status":"OK","vazao":0.85000,"vazao_status":"OK","status":"OK"}
+{"timestamp_ms":152340,"sequence":153,"pressao_ma":12.000,"pressao":50.000,"pressao_status":"OK","vazao":0.240,"flowmeter_ok":true,"vazao_status":"OK","status":"OK"}
 ```
 
 Se o flow meter não responder, a pressão continua sendo enviada:
 
 ```json
-{"timestamp_ms":153340,"sequence":154,"pressao_ma":12.000,"pressao":50.000,"pressao_status":"OK","vazao":null,"vazao_status":"ERRO_MODBUS_0xE2","status":"PARCIAL_SEM_VAZAO"}
+{"timestamp_ms":153340,"sequence":154,"pressao_ma":12.000,"pressao":50.000,"pressao_status":"OK","vazao":null,"flowmeter_ok":false,"vazao_status":"ERRO_MODBUS_0xE2","status":"PARCIAL_SEM_VAZAO"}
 ```
 
 Não imprima textos de depuração em `Serial`, pois a mesma porta é usada pelo

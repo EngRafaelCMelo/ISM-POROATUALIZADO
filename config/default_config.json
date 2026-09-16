@@ -12,6 +12,15 @@
     "reconexao_automatica": true,
     "intervalo_s": 1.0
   },
+  "flowmeter": {
+    "porta": "",
+    "baud_rate": 9600,
+    "slave_id": 1,
+    "funcao": 3,
+    "registrador_inicial": 58,
+    "quantidade_registradores": 2,
+    "intervalo_ms": 1000
+  },
   "aquisicao": {
     "fonte_valor": "software",
     "intervalo_s": 1.0,
@@ -41,7 +50,7 @@
       "limite_superior": 5.0,
       "ganho": 1.0,
       "offset": 0.0,
-      "casas": 2,
+      "casas": 3,
       "tolerancia": 0.15,
       "alerta": 4.5,
       "critico": 5.0

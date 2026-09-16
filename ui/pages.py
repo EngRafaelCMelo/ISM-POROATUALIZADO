@@ -201,7 +201,11 @@ class OverviewPage(QWidget):
 
     def update_measurement(self, measurement: Measurement) -> None:
         self.cards["pressao"].update_reading(measurement.pressure)
-        self.cards["vazao"].update_reading(measurement.flow)
+        self.cards["vazao"].update_reading(
+            measurement.flow,
+            unavailable_message=("Sem comunicação com flowmeter"
+                                 if measurement.flowmeter_ok is False else None),
+        )
         self.simulation_banner.setVisible(measurement.simulated)
         if self._first_time is None:
             self._first_time = measurement.received_at

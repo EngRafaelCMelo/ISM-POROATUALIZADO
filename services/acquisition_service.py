@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from dataclasses import replace
 from typing import Any
 
 from PySide6.QtCore import QObject, QTimer, Signal, Slot
@@ -32,6 +33,7 @@ class AcquisitionService(QObject):
         self.last_raw_message = ""
         self.simulation = False
         self._timeout_announced = False
+        self.latest_flow: tuple[float | None, bool, str] | None = None
         self.timeout_timer = QTimer(self)
         self.timeout_timer.setInterval(500)
         self.timeout_timer.timeout.connect(self._check_timeout)
@@ -41,6 +43,14 @@ class AcquisitionService(QObject):
     def process_real(self, raw: str) -> None:
         self._process(raw, simulated=False)
 
+    @Slot(float)
+    def process_flow(self, value: float) -> None:
+        self.latest_flow = (value, True, "OK")
+
+    @Slot(str)
+    def process_flow_error(self, message: str) -> None:
+        self.latest_flow = (None, False, message)
+
     @Slot(str)
     def process_simulated(self, raw: str) -> None:
         self._process(raw, simulated=True)
@@ -49,6 +59,14 @@ class AcquisitionService(QObject):
         self.last_raw_message = raw
         try:
             measurement = self.parser.parse(raw, simulated)
+            if self.latest_flow is not None:
+                flow_value, flow_ok, flow_status = self.latest_flow
+                measurement = replace(
+                    measurement,
+                    flowmeter_ok=flow_ok,
+                    flow=replace(measurement.flow, value=flow_value,
+                                 device_value=flow_value, device_status=flow_status),
+                )
             self.valid_messages += 1
             self.last_message_at = datetime.now()
             self.simulation = simulated

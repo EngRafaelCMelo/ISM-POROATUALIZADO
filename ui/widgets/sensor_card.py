@@ -73,9 +73,10 @@ class SensorCard(QFrame):
         details.setColumnStretch(1, 1)
         layout.addLayout(details)
 
-    def update_reading(self, reading: SensorReading, include_statistics: bool = True) -> None:
+    def update_reading(self, reading: SensorReading, include_statistics: bool = True,
+                       unavailable_message: str | None = None) -> None:
         if reading.value is None:
-            self.value_label.setText("—")
+            self.value_label.setText(unavailable_message or "—")
         else:
             self.value_label.setText(f"{reading.value:.{self.decimals}f}")
             if include_statistics and reading.quality not in (

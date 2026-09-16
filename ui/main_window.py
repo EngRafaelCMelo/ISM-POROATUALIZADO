@@ -25,9 +25,10 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QInputDialog,
+    QScrollArea,
 )
 
-from communication.serial_manager import SerialWorker, available_ports
+from communication.serial_manager import FlowmeterWorker, SerialWorker, available_ports
 from communication.simulator import SimulatorWorker
 from config.settings import AppPaths, ConfigManager
 from core.constants import Severity, TestStatus
@@ -72,6 +73,7 @@ class MainWindow(QMainWindow):
         self.export_service = ExportService(self.test_repository, self.event_repository)
         self.acquisition = AcquisitionService(config.data)
         self.serial_worker: SerialWorker | None = None
+        self.flowmeter_worker: FlowmeterWorker | None = None
         self.simulator: SimulatorWorker | None = None
         self.connected = False
         self.simulating = False
@@ -195,6 +197,9 @@ class MainWindow(QMainWindow):
         self.connect_button = QPushButton("Conectar equipamento")
         self.connect_button.setObjectName("primary")
         self.connect_button.clicked.connect(self._toggle_serial)
+        self.flow_port_combo = QComboBox()
+        self.flow_connect_button = QPushButton("Conectar flowmeter")
+        self.flow_connect_button.clicked.connect(self._toggle_flowmeter)
         self.simulation_button = QPushButton("Iniciar simulação")
         self.simulation_button.clicked.connect(self._toggle_simulation)
         self.sim_fault = QComboBox()
@@ -223,6 +228,9 @@ class MainWindow(QMainWindow):
         connection_layout.addWidget(self.port_combo)
         connection_layout.addWidget(self.refresh_ports_button)
         connection_layout.addWidget(self.connect_button)
+        connection_layout.addWidget(QLabel("Flowmeter"))
+        connection_layout.addWidget(self.flow_port_combo)
+        connection_layout.addWidget(self.flow_connect_button)
         connection_layout.addWidget(self.connection_options_button)
         connection_layout.addWidget(self.connection_options)
         connection_layout.addStretch()
@@ -242,7 +250,17 @@ class MainWindow(QMainWindow):
             self.calibration, self.settings, self.diagnostics,
         ):
             self.stack.addWidget(page)
-        main.addWidget(self.stack, 1)
+        # A 1360x728 display leaves less vertical space after the Windows
+        # title bar.  Keep the navigation/header fixed and let the active
+        # page scroll instead of clipping its lower controls and labels.
+        page_scroll = QScrollArea()
+        page_scroll.setObjectName("pageScroll")
+        page_scroll.setWidgetResizable(True)
+        page_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        page_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        page_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        page_scroll.setWidget(self.stack)
+        main.addWidget(page_scroll, 1)
 
     def _connect_signals(self) -> None:
         for page in (self.overview, self.test_page):
@@ -327,10 +345,25 @@ class MainWindow(QMainWindow):
             self.port_combo.addItem(f"{device} — {description}", device)
         if not ports:
             self.port_combo.addItem("Nenhum ESP32 detectado", "")
+        self.flow_port_combo.clear()
+        if ports:
+            for device, description in ports:
+                self.flow_port_combo.addItem(f"{device} — {description}", device)
+        else:
+            self.flow_port_combo.addItem("Nenhum adaptador detectado", "")
         target = selected or configured
         for index in range(self.port_combo.count()):
             if self.port_combo.itemData(index) == target:
                 self.port_combo.setCurrentIndex(index)
+                break
+        flow_configured = self.config.get("flowmeter.porta", "")
+        flow_target = flow_configured or next(
+            (candidate for candidate in ("COM4", "COM7")
+             if any(device == candidate for device, _ in ports)), ""
+        )
+        for index in range(self.flow_port_combo.count()):
+            if self.flow_port_combo.itemData(index) == flow_target:
+                self.flow_port_combo.setCurrentIndex(index)
                 break
         serial_active = bool(self.serial_worker and self.serial_worker.isRunning())
         self.connect_button.setEnabled(bool(ports) or serial_active)
@@ -338,6 +371,38 @@ class MainWindow(QMainWindow):
             f"{len(ports)} porta(s) encontrada(s)" if ports else "Conecte o ESP32 e clique em Atualizar",
             3000,
         )
+
+    def _toggle_flowmeter(self) -> None:
+        if self.flowmeter_worker and self.flowmeter_worker.isRunning():
+            self._stop_flowmeter()
+            return
+        port = self.flow_port_combo.currentData()
+        if not port:
+            QMessageBox.warning(self, "Flowmeter", "Selecione a porta USB–RS485.")
+            return
+        self.flowmeter_worker = FlowmeterWorker(port)
+        self.flowmeter_worker.reading_received.connect(self.acquisition.process_flow)
+        self.flowmeter_worker.communication_error.connect(self.acquisition.process_flow_error)
+        self.flowmeter_worker.state_changed.connect(self._on_flowmeter_state)
+        self.flowmeter_worker.communication_error.connect(self._on_flowmeter_error)
+        self.flowmeter_worker.start()
+        self.flow_connect_button.setText("Desconectar flowmeter")
+
+    def _stop_flowmeter(self) -> None:
+        if self.flowmeter_worker:
+            self.flowmeter_worker.stop()
+            self.flowmeter_worker = None
+        self.acquisition.process_flow_error("SEM_COMUNICACAO")
+        self.flow_connect_button.setText("Conectar flowmeter")
+
+    def _on_flowmeter_state(self, connected: bool, message: str) -> None:
+        self.statusBar().showMessage(message, 5000)
+        if connected:
+            self.flow_connect_button.setText("Desconectar flowmeter")
+
+    def _on_flowmeter_error(self, message: str) -> None:
+        self.statusBar().showMessage(f"Flowmeter: {message}", 8000)
+        self.diagnostics.values["flow_state"].setText(message)
 
     def _toggle_serial(self) -> None:
         if self.serial_worker and self.serial_worker.isRunning():
@@ -369,6 +434,7 @@ class MainWindow(QMainWindow):
             self._stop_simulation()
             return
         self._stop_serial()
+        self._stop_flowmeter()
         self.simulator = SimulatorWorker(
             float(self.config.get("simulacao.intervalo_s", 1.0)),
             float(self.config.get("simulacao.ruido", 0.03)),
@@ -839,6 +905,7 @@ class MainWindow(QMainWindow):
     def _restart_connection(self) -> None:
         was_simulating = self.simulating
         self._stop_serial()
+        self._stop_flowmeter()
         self._stop_simulation()
         if was_simulating:
             self._toggle_simulation()
@@ -887,5 +954,6 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
         self._stop_serial()
+        self._stop_flowmeter()
         self._stop_simulation()
         event.accept()

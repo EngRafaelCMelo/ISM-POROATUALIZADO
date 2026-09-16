@@ -23,6 +23,7 @@ class Measurement:
     device_timestamp_ms: int | None = None
     pressure: SensorReading = field(default_factory=SensorReading)
     flow: SensorReading = field(default_factory=SensorReading)
+    flowmeter_ok: bool | None = None
     communication_state: str = "conectado"
     raw_message: str = ""
     simulated: bool = False

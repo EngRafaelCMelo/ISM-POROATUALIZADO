@@ -19,6 +19,7 @@ def test_complete_json_message(config_data: dict) -> None:
         "pressao_status": "OK",
         "vazao": 1.25,
         "vazao_status": "OK",
+        "flowmeter_ok": True,
         "status": "OK",
     })
     measurement = parser.parse(raw)
@@ -29,6 +30,28 @@ def test_complete_json_message(config_data: dict) -> None:
     assert measurement.flow.value == pytest.approx(1.25)
     assert measurement.pressure.device_status == "OK"
     assert measurement.flow.device_status == "OK"
+    assert measurement.flowmeter_ok is True
+
+
+def test_modbus_example_converts_uint32_big_endian_to_l_min(config_data: dict) -> None:
+    # Corpo da resposta: 0x000000F0 = 240 milésimos de L/min.
+    response_body = bytes.fromhex("01 03 04 00 00 00 F0")
+    crc = 0xFFFF
+    for byte in response_body:
+        crc ^= byte
+        for _ in range(8):
+            crc = (crc >> 1) ^ 0xA001 if crc & 1 else crc >> 1
+    response = response_body + bytes((crc & 0xFF, crc >> 8))
+    assert response.hex(" ").upper() == "01 03 04 00 00 00 F0 FA 77"
+    bruto = int.from_bytes(response[3:7], "big")
+    assert bruto / 1000.0 == pytest.approx(0.240)
+
+
+def test_flowmeter_false_does_not_present_zero_as_measurement(config_data: dict) -> None:
+    parser = ProtocolParser(config_data["sensores"])
+    measurement = parser.parse('{"pressao":50,"vazao":null,"flowmeter_ok":false}')
+    assert measurement.flow.value is None
+    assert measurement.flowmeter_ok is False
 
 
 def test_reduced_message_is_accepted(config_data: dict) -> None:
