@@ -1,0 +1,20 @@
+{
+  "_aviso": "EXEMPLO INCOMPLETO. Preencha somente com dados confirmados no manual do seu flow meter.",
+  "configurado": false,
+  "endereco_escravo": null,
+  "baud_rate": null,
+  "paridade": null,
+  "stop_bits": null,
+  "funcao": null,
+  "registrador_inicial": null,
+  "quantidade_registradores": null,
+  "tipo_dado": null,
+  "ordem_bytes": null,
+  "ordem_palavras": null,
+  "fator_escala": null,
+  "unidade_nativa": null,
+  "timeout_ms": 500,
+  "tentativas": 3,
+  "valor_minimo": null,
+  "valor_maximo": null
+}

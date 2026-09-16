@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
+import sqlite3
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,7 +20,7 @@ class AppPaths:
     @classmethod
     def create(cls) -> "AppPaths":
         if getattr(sys, "frozen", False):
-            base = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "ISM" / "Porosimetro"
+            base = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "ISM" / "Permeabilimetro"
         else:
             base = Path(__file__).resolve().parents[1]
         paths = cls(
@@ -119,7 +119,24 @@ class ConfigManager:
     @property
     def database_path(self) -> Path:
         configured = self.get("dados.banco")
-        return Path(configured) if configured else self.paths.data / "porosimetro.db"
+        return Path(configured) if configured else self.paths.data / "permeabilimetro.db"
+
+    def migrate_legacy_database(self) -> Path | None:
+        """Copia, após checagem e backup, a base antiga sem jamais removê-la."""
+        legacy = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "ISM" / "Porosimetro" / "data" / "porosimetro.db"
+        target = self.database_path
+        if target.exists() or not legacy.exists():
+            return None
+        with sqlite3.connect(legacy) as source:
+            result = source.execute("PRAGMA integrity_check").fetchone()
+            if not result or result[0] != "ok":
+                raise OSError("Banco legado reprovado no PRAGMA integrity_check")
+            backup_dir = legacy.parent / "backups"; backup_dir.mkdir(exist_ok=True)
+            with sqlite3.connect(backup_dir / "porosimetro_pre_migracao.db") as backup:
+                source.backup(backup)
+            with sqlite3.connect(target) as destination:
+                source.backup(destination)
+        return target
 
     def backup_database(self) -> Path | None:
         source = self.database_path
@@ -128,5 +145,27 @@ class ConfigManager:
         backup_dir = self.paths.data / "backups"
         backup_dir.mkdir(exist_ok=True)
         target = backup_dir / f"{source.stem}_backup{source.suffix}"
-        shutil.copy2(source, target)
+        with sqlite3.connect(source) as source_connection, sqlite3.connect(target) as target_connection:
+            source_connection.backup(target_connection)
+            result = target_connection.execute("PRAGMA integrity_check").fetchone()
+            if not result or result[0] != "ok":
+                raise OSError("Falha na verificação de integridade do backup SQLite")
         return target
+
+    def real_mode_errors(self) -> list[str]:
+        """Retorna parâmetros obrigatórios ausentes sem inventar dados do equipamento."""
+        errors: list[str] = []
+        pressure = self.get("sensores.pressao", {})
+        if pressure.get("limite_inferior") is None or pressure.get("limite_superior") is None:
+            errors.append("Informe a faixa mínima e máxima do transdutor de pressão")
+        flow = self.get("flow_meter", {})
+        required = (
+            "endereco_escravo", "baud_rate", "paridade", "stop_bits", "funcao",
+            "registrador_inicial", "quantidade_registradores", "tipo_dado",
+            "ordem_bytes", "ordem_palavras", "fator_escala", "unidade_nativa",
+        )
+        if not flow.get("configurado") or any(flow.get(key) is None for key in required):
+            errors.append("Complete e confirme a configuração Modbus do flow meter")
+        if not self.get("comunicacao.porta"):
+            errors.append("Selecione a porta serial do ESP32")
+        return errors

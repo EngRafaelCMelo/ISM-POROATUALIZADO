@@ -57,3 +57,8 @@ class Database:
         except sqlite3.Error:
             logger.exception("Banco indisponível")
             return False
+
+    def close(self) -> None:
+        """As conexões são curtas; checkpoint garante fechamento limpo do WAL."""
+        with self.connect() as connection:
+            connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")

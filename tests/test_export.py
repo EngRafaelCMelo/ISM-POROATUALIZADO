@@ -48,8 +48,8 @@ def test_export_xlsx_json_and_pdf(tmp_path) -> None:
     )
     tests.finish(session.id, "Ensaio de validação")
     CalculationRepository(database).save(
-        session.id, "Lei de Boyle", {"gas": "Helio"},
-        {"skeletal_volume_mean_cm3": 20.0, "porosity_mean_percent": 20.0},
+        session.id, "Permeabilidade a gás", {"gas": "Helio"},
+        {"permeability_md": 20.0},
     )
     service = ExportService(tests, events)
     xlsx = service.export_xlsx(session.id, tmp_path / "exports")

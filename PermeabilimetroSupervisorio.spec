@@ -2,7 +2,7 @@
 from pathlib import Path
 
 root = Path(SPECPATH)
-app_name = "PorosimetroSupervisorio_v1_5_0"
+app_name = "PermeabilimetroSupervisorio_v2_1_0"
 
 a = Analysis(
     [str(root / "app.py")],
@@ -11,6 +11,7 @@ a = Analysis(
     datas=[
         (str(root / "ui" / "styles.qss"), "ui"),
         (str(root / "config" / "default_config.json"), "config"),
+        (str(root / "assets" / "branding"), "assets/branding"),
     ],
     hiddenimports=["openpyxl", "reportlab", "pyqtgraph"],
     hookspath=[],
@@ -30,7 +31,7 @@ exe = EXE(
     strip=False,
     upx=True,
     console=False,
-    icon=None,
+    icon=str(root / "assets" / "branding" / "ism_app_icon.ico"),
 )
 coll = COLLECT(
     exe,

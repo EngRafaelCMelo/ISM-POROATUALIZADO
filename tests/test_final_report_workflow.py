@@ -22,11 +22,7 @@ def test_finishing_test_generates_pdf_automatically(tmp_path, monkeypatch) -> No
     database = Database(config.database_path)
     database.initialize()
     window = MainWindow(config, database, paths)
-    assert all(button.isHidden() for button in window.advanced_nav_buttons)
-    assert window.connection_options.isHidden()
-    window.advanced_toggle.setChecked(True)
-    assert all(not button.isHidden() for button in window.advanced_nav_buttons)
-    window.advanced_toggle.setChecked(False)
+    assert len(window.advanced_nav_buttons) == 3
     session = window.test_service.start(Definition(
         code="ENS-2026-0200",
         sample_name="Amostra relatório",

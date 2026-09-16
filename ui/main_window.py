@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import json
 import os
 import shutil
 from collections import deque
@@ -9,8 +10,8 @@ from pathlib import Path
 from typing import Any
 
 import pyqtgraph as pg
-from PySide6.QtCore import QTimer, Qt
-from PySide6.QtGui import QAction, QCloseEvent
+from PySide6.QtCore import QSize, QTimer, Qt
+from PySide6.QtGui import QAction, QCloseEvent, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -45,8 +46,10 @@ from services.export_service import ExportService
 from services.test_service import TestService
 from ui.dialogs.marker_dialog import MarkerDialog
 from ui.dialogs.test_dialog import TestSetupDialog
+from ui.workers import ExportWorker
 from ui.calculation_page import CalculationPage
 from ui.pages import (
+    AboutPage,
     CalibrationPage,
     DiagnosticsPage,
     GraphsPage,
@@ -55,6 +58,9 @@ from ui.pages import (
     SettingsPage,
     TestPage,
 )
+from ui.theme import COLORS, icon_path
+from ui.resources import branding_path
+from ui.widgets.components import StatusBadge
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +83,7 @@ class MainWindow(QMainWindow):
         self.simulator: SimulatorWorker | None = None
         self.connected = False
         self.simulating = False
+        self.export_workers: set[ExportWorker] = set()
         self.message_times: deque[datetime] = deque(maxlen=20)
         self.calculation_test_id: int | None = None
 
@@ -89,9 +96,9 @@ class MainWindow(QMainWindow):
         self._refresh_ports()
         self._refresh_history()
         self._setup_timers()
-        self.setWindowTitle("Supervisor de Porosímetro")
+        self.setWindowTitle("Supervisório ISM – Permeabilímetro")
         self.resize(1500, 920)
-        self.setMinimumSize(1160, 720)
+        self.setMinimumSize(1180, 700)
 
     def _build_ui(self) -> None:
         root = QWidget()
@@ -103,79 +110,84 @@ class MainWindow(QMainWindow):
 
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(205)
+        sidebar.setFixedWidth(224)
         side_layout = QVBoxLayout(sidebar)
         side_layout.setContentsMargins(11, 17, 11, 17)
-        brand = QLabel("ISM\nPOROSÍMETRO")
-        brand.setObjectName("brand")
+        brand = QLabel()
+        brand.setObjectName("brandLogo")
+        brand.setPixmap(QPixmap(str(branding_path("ism_simbolo_transparente.png"))).scaled(
+            82, 58, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
+        ))
+        brand.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        brand_name = QLabel("PERMEABILÍMETRO SUPERVISÓRIO")
+        brand_name.setObjectName("brandName")
         side_layout.addWidget(brand)
-        self.nav_buttons: list[QPushButton | None] = [None] * 8
-        main_nav_items = [
-            (0, "Início"),
-            (1, "Executar ensaio"),
-            (2, "Calcular porosidade"),
-            (4, "Histórico e relatórios"),
+        side_layout.addWidget(brand_name)
+        side_layout.addSpacing(16)
+        section = QLabel("OPERAÇÃO")
+        section.setObjectName("sidebarCaption")
+        side_layout.addWidget(section)
+        self.nav_buttons: list[QPushButton] = []
+        self.nav_by_page: dict[int, QPushButton] = {}
+        nav_items = [
+            ("Visão geral", "overview", 0), ("Novo ensaio", "new_test", 1),
+            ("Histórico", "history", 4), ("Cálculos", "calculations", 2),
+            ("Calibração", "calibration", 5), ("Configurações", "settings", 6),
         ]
-        for index, text in main_nav_items:
+        for text, icon, page_index in nav_items:
             button = QPushButton(text)
             button.setObjectName("navButton")
+            button.setIcon(QIcon(icon_path(icon)))
+            button.setIconSize(QSize(19, 19))
             button.setCheckable(True)
             button.setAutoExclusive(True)
-            button.clicked.connect(lambda _checked=False, i=index: self._navigate(i))
+            button.clicked.connect(lambda _checked=False, i=page_index: self._navigate(i))
             side_layout.addWidget(button)
-            self.nav_buttons[index] = button
-
-        self.advanced_toggle = QPushButton("Mostrar opções avançadas")
-        self.advanced_toggle.setObjectName("navAdvancedButton")
-        self.advanced_toggle.setCheckable(True)
-        self.advanced_toggle.toggled.connect(self._toggle_advanced_navigation)
-        side_layout.addWidget(self.advanced_toggle)
-        self.advanced_nav_buttons: list[QPushButton] = []
-        for index, text in [
-            (3, "Gráficos detalhados"),
-            (5, "Calibração"),
-            (6, "Configurações"),
-            (7, "Diagnóstico técnico"),
-        ]:
-            button = QPushButton(text)
-            button.setObjectName("navButton")
-            button.setCheckable(True)
-            button.setAutoExclusive(True)
-            button.clicked.connect(lambda _checked=False, i=index: self._navigate(i))
-            button.hide()
-            side_layout.addWidget(button)
-            self.nav_buttons[index] = button
-            self.advanced_nav_buttons.append(button)
+            self.nav_buttons.append(button)
+            self.nav_by_page[page_index] = button
         self.nav_buttons[0].setChecked(True)
+        self.advanced_nav_buttons: list[QPushButton] = []
+        advanced = QLabel("FERRAMENTAS")
+        advanced.setObjectName("sidebarCaption")
+        side_layout.addWidget(advanced)
+        for text, icon, page_index in [("Gráficos avançados", "graphs", 3), ("Diagnóstico", "diagnostics", 7), ("Sobre", "about", 8)]:
+            button = QPushButton(text); button.setObjectName("navButton")
+            button.setIcon(QIcon(icon_path(icon))); button.setIconSize(QSize(19, 19))
+            button.setCheckable(True); button.setAutoExclusive(True)
+            button.clicked.connect(lambda _checked=False, i=page_index: self._navigate(i))
+            side_layout.addWidget(button); self.nav_buttons.append(button); self.advanced_nav_buttons.append(button); self.nav_by_page[page_index] = button
         side_layout.addStretch()
         version = QLabel(f"Versão {self.config.get('aplicacao.versao', '1.0.0')}")
-        version.setStyleSheet("color: #AFC8D0; padding: 8px;")
+        version.setObjectName("sidebarVersion")
         side_layout.addWidget(version)
         root_layout.addWidget(sidebar)
 
         main = QVBoxLayout()
-        main.setContentsMargins(16, 12, 16, 14)
-        main.setSpacing(10)
+        main.setContentsMargins(20, 16, 20, 14)
+        main.setSpacing(12)
         root_layout.addLayout(main, 1)
         topbar = QFrame()
         topbar.setObjectName("topbar")
         top_layout = QHBoxLayout(topbar)
         top_layout.setContentsMargins(14, 9, 14, 9)
-        system_name = QLabel(self.config.get("aplicacao.nome", "Supervisor de Porosímetro"))
-        system_name.setObjectName("sectionTitle")
+        self.header_title = QLabel("Visão geral")
+        self.header_title.setObjectName("headerTitle")
         self.current_test_label = QLabel("Nenhum ensaio ativo")
         self.current_test_label.setObjectName("muted")
         name_box = QVBoxLayout()
-        name_box.addWidget(system_name)
+        name_box.addWidget(self.header_title)
         name_box.addWidget(self.current_test_label)
         top_layout.addLayout(name_box)
         top_layout.addStretch()
-        self.connection_badge = QLabel("Desconectado")
-        self.connection_badge.setObjectName("pillNeutral")
-        self.equipment_badge = QLabel("Aguardando dados")
-        self.equipment_badge.setObjectName("pillNeutral")
+        self.mode_badge = StatusBadge("MODO REAL", "info")
+        self.connection_badge = StatusBadge("Desconectado", "neutral")
+        self.equipment_badge = StatusBadge("Aguardando dados", "neutral")
         self.clock_label = QLabel()
         self.user_label = QLabel(f"Usuário: {self.config.get('aplicacao.usuario', 'Operador')}")
+        self.clock_label.setVisible(False)
+        self.user_label.setVisible(False)
+        self.user_label.setToolTip(f"Operador atual: {self.config.get('aplicacao.usuario', 'Operador')}")
+        top_layout.addWidget(self.mode_badge)
         top_layout.addWidget(self.connection_badge)
         top_layout.addWidget(self.equipment_badge)
         top_layout.addWidget(self.clock_label)
@@ -183,19 +195,19 @@ class MainWindow(QMainWindow):
         main.addWidget(topbar)
 
         connection_bar = QFrame()
-        connection_bar.setObjectName("card")
+        connection_bar.setObjectName("connectionBar")
         connection_layout = QHBoxLayout(connection_bar)
         connection_layout.setContentsMargins(12, 8, 12, 8)
         self.port_combo = QComboBox()
-        self.port_combo.setMinimumWidth(220)
+        self.port_combo.setMinimumWidth(190)
         self.baud_combo = QComboBox()
         self.baud_combo.addItems(["9600", "19200", "38400", "57600", "115200", "230400"])
         self.baud_combo.setCurrentText(str(self.config.get("comunicacao.baud_rate", 115200)))
-        self.refresh_ports_button = QPushButton("Atualizar")
-        self.refresh_ports_button.setToolTip("Procurar novamente o ESP32 conectado ao computador")
-        self.refresh_ports_button.clicked.connect(self._refresh_ports)
-        self.connect_button = QPushButton("Conectar equipamento")
+        refresh_ports = QPushButton("Atualizar portas")
+        refresh_ports.clicked.connect(self._refresh_ports)
+        self.connect_button = QPushButton("Conectar")
         self.connect_button.setObjectName("primary")
+        self.connect_button.setIcon(QIcon(icon_path("connect")))
         self.connect_button.clicked.connect(self._toggle_serial)
         self.flow_port_combo = QComboBox()
         self.flow_connect_button = QPushButton("Conectar flowmeter")
@@ -211,22 +223,11 @@ class MainWindow(QMainWindow):
         self.sim_fault.addItem("Corrente 21,0 mA", "critico_alto")
         self.sim_fault.addItem("Perda de comunicação", "perda")
         self.sim_fault.currentIndexChanged.connect(self._apply_sim_fault)
-        self.connection_options = QWidget()
-        options_layout = QHBoxLayout(self.connection_options)
-        options_layout.setContentsMargins(0, 0, 0, 0)
-        options_layout.addWidget(QLabel("Baud"))
-        options_layout.addWidget(self.baud_combo)
-        options_layout.addSpacing(12)
-        options_layout.addWidget(self.simulation_button)
-        options_layout.addWidget(self.sim_fault)
-        self.connection_options.hide()
-        self.connection_options_button = QPushButton("Opções de conexão")
-        self.connection_options_button.setCheckable(True)
-        self.connection_options_button.toggled.connect(self._toggle_connection_options)
-
-        connection_layout.addWidget(QLabel("ESP32"))
+        connection_layout.addWidget(QLabel("Porta"))
         connection_layout.addWidget(self.port_combo)
-        connection_layout.addWidget(self.refresh_ports_button)
+        connection_layout.addWidget(refresh_ports)
+        connection_layout.addWidget(QLabel("Baud"))
+        connection_layout.addWidget(self.baud_combo)
         connection_layout.addWidget(self.connect_button)
         connection_layout.addWidget(QLabel("Flowmeter"))
         connection_layout.addWidget(self.flow_port_combo)
@@ -234,6 +235,8 @@ class MainWindow(QMainWindow):
         connection_layout.addWidget(self.connection_options_button)
         connection_layout.addWidget(self.connection_options)
         connection_layout.addStretch()
+        connection_layout.addWidget(self.simulation_button)
+        connection_layout.addWidget(self.sim_fault)
         main.addWidget(connection_bar)
 
         self.stack = QStackedWidget()
@@ -245,9 +248,10 @@ class MainWindow(QMainWindow):
         self.calibration = CalibrationPage()
         self.settings = SettingsPage(self.config.data)
         self.diagnostics = DiagnosticsPage()
+        self.about = AboutPage(self.config.get("aplicacao.versao", "2.0.0"))
         for page in (
             self.overview, self.test_page, self.calculations, self.graphs, self.history,
-            self.calibration, self.settings, self.diagnostics,
+            self.calibration, self.settings, self.diagnostics, self.about,
         ):
             self.stack.addWidget(page)
         # A 1360x728 display leaves less vertical space after the Windows
@@ -268,8 +272,6 @@ class MainWindow(QMainWindow):
             page.pause_requested.connect(self._toggle_pause)
             page.finish_requested.connect(self._finish_test)
             page.marker_requested.connect(self._add_marker)
-        self.test_page.calculations_requested.connect(self._open_calculations)
-        self.overview.calculations_requested.connect(self._open_calculations)
         self.overview.acknowledge_requested.connect(self._acknowledge_alarm)
         self.graphs.export_requested.connect(self._export_graph_png)
         self.calculations.save_requested.connect(self._save_calculation)
@@ -295,7 +297,7 @@ class MainWindow(QMainWindow):
     def _load_style(self) -> None:
         style_path = Path(__file__).with_name("styles.qss")
         self.setStyleSheet(style_path.read_text(encoding="utf-8"))
-        pg.setConfigOptions(antialias=True, foreground="#405860")
+        pg.setConfigOptions(antialias=True, foreground=COLORS["muted"], background=COLORS["surface"])
 
     def _setup_timers(self) -> None:
         self.clock_timer = QTimer(self)
@@ -305,6 +307,11 @@ class MainWindow(QMainWindow):
 
     def _navigate(self, index: int) -> None:
         self.stack.setCurrentIndex(index)
+        titles = {0: "Visão geral", 1: "Novo ensaio", 2: "Cálculos", 3: "Gráficos avançados", 4: "Histórico de ensaios", 5: "Calibração", 6: "Configurações", 7: "Diagnóstico", 8: "Sobre"}
+        self.header_title.setText(titles.get(index, "Supervisor"))
+        button = self.nav_by_page.get(index)
+        if button:
+            button.setChecked(True)
         if index == 4:
             self._refresh_history()
         elif index == 5:
@@ -312,23 +319,10 @@ class MainWindow(QMainWindow):
         elif index == 2:
             self._refresh_calculation_history()
 
-    def _toggle_advanced_navigation(self, visible: bool) -> None:
-        self.advanced_toggle.setText(
-            "Ocultar opções avançadas" if visible else "Mostrar opções avançadas"
-        )
-        for button in self.advanced_nav_buttons:
-            button.setVisible(visible)
-        if not visible and self.stack.currentIndex() in (3, 5, 6, 7):
-            self._navigate(0)
-            self.nav_buttons[0].setChecked(True)
-
-    def _toggle_connection_options(self, visible: bool) -> None:
-        self.connection_options.setVisible(visible)
-        self.connection_options_button.setText(
-            "Ocultar opções" if visible else "Opções de conexão"
-        )
-
     def _set_badge(self, label: QLabel, text: str, state: str) -> None:
+        if isinstance(label, StatusBadge):
+            label.set_state(text, state)
+            return
         label.setText(text)
         label.setObjectName({
             "good": "pillGood", "warn": "pillWarn", "bad": "pillBad"
@@ -413,12 +407,12 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Porta serial", "Selecione uma porta serial válida.")
             return
         self._stop_simulation()
-        self.serial_worker = SerialWorker(port, int(self.baud_combo.currentText()))
+        self.serial_worker = SerialWorker(port, int(self.baud_combo.currentText()), reconnect=bool(self.config.get("comunicacao.reconexao_automatica", True)))
         self.serial_worker.line_received.connect(self.acquisition.process_real)
         self.serial_worker.state_changed.connect(self._on_connection_state)
         self.serial_worker.communication_error.connect(self._on_serial_error)
         self.serial_worker.start()
-        self.connect_button.setText("Desconectar equipamento")
+        self.connect_button.setText("Desconectar")
         self.diagnostics.values["port"].setText(str(port))
         self.diagnostics.values["baud"].setText(self.baud_combo.currentText())
 
@@ -426,7 +420,7 @@ class MainWindow(QMainWindow):
         if self.serial_worker:
             self.serial_worker.stop()
             self.serial_worker = None
-        self.connect_button.setText("Conectar equipamento")
+        self.connect_button.setText("Conectar")
         self._on_connection_state(False, "Desconectado")
 
     def _toggle_simulation(self) -> None:
@@ -464,18 +458,17 @@ class MainWindow(QMainWindow):
 
     def _on_connection_state(self, connected: bool, message: str) -> None:
         self.connected = connected
-        self.overview.set_connection_ready(connected)
         self._set_badge(self.connection_badge, "Conectado" if connected else "Desconectado",
                         "good" if connected else "neutral")
         self.diagnostics.values["connection"].setText(message)
         self.diagnostics.values["mode"].setText("Real")
+        self.mode_badge.set_state("MODO REAL", "info")
         if not connected:
-            self.connect_button.setText("Conectar equipamento")
+            self.connect_button.setText("Conectar")
 
     def _on_simulation_state(self, active: bool, message: str) -> None:
         self.simulating = active
         self.connected = active
-        self.overview.set_connection_ready(active)
         self.simulation_button.setText("Parar simulação" if active else "Iniciar simulação")
         self._set_badge(
             self.connection_badge, "Simulação ativa" if active else "Desconectado",
@@ -483,6 +476,7 @@ class MainWindow(QMainWindow):
         )
         self.diagnostics.values["connection"].setText(message)
         self.diagnostics.values["mode"].setText("Simulação" if active else "—")
+        self.mode_badge.set_state("SIMULAÇÃO" if active else "MODO REAL", "warn" if active else "info")
         self.overview.simulation_banner.setVisible(active)
 
     def _on_serial_error(self, message: str) -> None:
@@ -500,23 +494,11 @@ class MainWindow(QMainWindow):
         self.calculations.update_measurement(measurement)
         self.diagnostics.raw.setPlainText(measurement.raw_message)
         self.diagnostics.values["ma_pressure"].setText(self._format_ma(measurement.pressure.current_ma))
-        self.diagnostics.values["pressure_state"].setText(
-            measurement.pressure.device_status or "—"
-        )
-        self.diagnostics.values["flow_state"].setText(
-            measurement.flow.device_status or "—"
-        )
-        communication_state = measurement.communication_state
-        if communication_state in ("OK", "SIMULADO"):
-            self._set_badge(self.equipment_badge, "Operação normal", "good")
-        elif communication_state == "PARCIAL_SEM_VAZAO":
-            self._set_badge(self.equipment_badge, "Pressão ativa · vazão pendente", "warn")
-        elif communication_state == "PARCIAL_SEM_PRESSAO":
-            self._set_badge(self.equipment_badge, "Vazão ativa · pressão pendente", "warn")
-        elif communication_state.startswith(("PARCIAL", "ALERTA")):
-            self._set_badge(self.equipment_badge, communication_state, "warn")
-        else:
-            self._set_badge(self.equipment_badge, communication_state, "bad")
+        self._last_firmware_version = measurement.firmware_version
+        self.diagnostics.values["flow_health"].setText("OK" if measurement.flow.valid else "Falha")
+        self.diagnostics.values["reading_age"].setText("0.0 s")
+        healthy = measurement.pressure.valid and measurement.flow.valid
+        self._set_badge(self.equipment_badge, "Operação normal" if healthy else "Sensor em falha", "good" if healthy else "bad")
         if self.test_service.current:
             try:
                 recorded = self.test_service.record(measurement)
@@ -557,11 +539,25 @@ class MainWindow(QMainWindow):
     def _update_counters(self, valid: int, invalid: int) -> None:
         self.diagnostics.values["valid"].setText(str(valid))
         self.diagnostics.values["invalid"].setText(str(invalid))
+        self.overview.valid_count.setText(str(valid))
+        self.overview.invalid_count.setText(str(invalid))
 
     def _start_test(self) -> None:
         if self.test_service.current:
             QMessageBox.information(self, "Ensaio ativo", "Finalize o ensaio atual antes de iniciar outro.")
             return
+        if self.simulating:
+            response = QMessageBox.question(
+                self, "Ensaio simulado",
+                "Os dados não vêm do equipamento real e o relatório será marcado como SIMULADO. Continuar?",
+            )
+            if response != QMessageBox.StandardButton.Yes:
+                return
+        else:
+            errors = self.config.real_mode_errors()
+            if errors:
+                QMessageBox.critical(self, "Configuração real incompleta", "Não é seguro iniciar o ensaio real:\n\n• " + "\n• ".join(errors))
+                return
         dialog = TestSetupDialog(
             self.test_repository.next_code(),
             Path(self.config.get("dados.diretorio_exportacao") or self.paths.exports),
@@ -570,18 +566,21 @@ class MainWindow(QMainWindow):
         if dialog.exec() != dialog.DialogCode.Accepted:
             return
         try:
-            session = self.test_service.start(dialog.definition())
+            definition = dialog.definition()
+            definition.configuration_snapshot = json.dumps(self.config.data, ensure_ascii=False, sort_keys=True)
+            definition.firmware_version = getattr(self, "_last_firmware_version", "")
+            definition.simulated = self.simulating
+            session = self.test_service.start(definition)
             self.graphs.reset()
             self.test_page.reset()
             self.test_page.set_session(session)
-            self.calculations.set_session(session.definition, "active")
+            self.calculations.set_session(session.definition)
             self.calculation_test_id = session.id
-            self._refresh_calculation_history()
             self.overview.reset_test()
             self.overview.set_test_active(True)
             self.current_test_label.setText(f"{session.definition.code} — {session.definition.sample_name}")
             self._navigate(0)
-            self.nav_buttons[0].setChecked(True)
+            self.nav_by_page[0].setChecked(True)
         except Exception as exc:
             logger.exception("Falha ao criar ensaio")
             QMessageBox.critical(self, "Novo ensaio", f"Não foi possível iniciar:\n{exc}")
@@ -594,45 +593,9 @@ class MainWindow(QMainWindow):
         self.overview.set_test_active(True, paused)
         self.test_page.set_session(self.test_service.current)
 
-    def _open_calculations(self) -> None:
-        session = self.test_service.current
-        if not session:
-            QMessageBox.information(
-                self,
-                "Cálculos de porosidade",
-                "Inicie um ensaio ou abra um ensaio finalizado no Histórico.",
-            )
-            return
-        self.calculation_test_id = session.id
-        self.calculations.set_session(session.definition, "active")
-        self._refresh_calculation_history()
-        self._navigate(2)
-        self.nav_buttons[2].setChecked(True)
-
     def _finish_test(self) -> None:
         if not self.test_service.current:
             return
-        current = self.test_service.current
-        saved_calculations = self.calculation_repository.list(current.id)
-        has_saved_porosity = any(
-            row["tipo"] == "Lei de Boyle" for row in saved_calculations
-        )
-        has_pending_porosity = any(
-            result[0] == "Lei de Boyle" for result in self.calculations.pending_results()
-        )
-        requires_porosity = "poros" in current.definition.test_type.lower()
-        if requires_porosity and not has_saved_porosity and not has_pending_porosity:
-            response = QMessageBox.warning(
-                self,
-                "Porosidade ainda não calculada",
-                "Este ensaio ainda não possui um cálculo de porosidade salvo.\n\n"
-                "Deseja finalizar mesmo assim? Escolha Não para voltar e calcular.",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if response != QMessageBox.StandardButton.Yes:
-                self._open_calculations()
-                return
         response = QMessageBox.question(
             self, "Finalizar ensaio",
             "Deseja finalizar o ensaio? Após finalizar, novas leituras não serão registradas.",
@@ -645,43 +608,19 @@ class MainWindow(QMainWindow):
         if not accepted:
             return
         try:
-            for calculation_type, inputs, results, calculation_notes in self.calculations.pending_results():
-                self.calculation_repository.save(
-                    current.id, calculation_type, inputs, results, calculation_notes
-                )
-                self.calculations.mark_saved(calculation_type)
             session = self.test_service.finish(note)
             self.overview.set_test_active(False)
             self.current_test_label.setText("Nenhum ensaio ativo")
             self.calculation_test_id = session.id
-            self.calculations.set_session(session.definition, "finished")
+            self.calculations.set_session(session.definition)
             self._refresh_history()
-            report_directory = Path(
-                session.definition.export_directory
-                or self.config.get("dados.diretorio_exportacao")
-                or self.paths.exports
+            export = QMessageBox.question(
+                self, "Ensaio finalizado",
+                f"Ensaio {session.definition.code} salvo com {session.sample_count} amostras.\n\n"
+                "Deseja exportar o relatório XLSX agora?",
             )
-            try:
-                report = self.export_service.export_pdf(session.id, report_directory)
-                self.overview.set_porosity_ready(
-                    any(row["tipo"] == "Lei de Boyle" for row in self.calculation_repository.list(session.id))
-                )
-                self.overview.set_report_ready(True)
-                QMessageBox.information(
-                    self,
-                    "Ensaio finalizado",
-                    f"Ensaio {session.definition.code} salvo com {session.sample_count} amostras.\n\n"
-                    f"Relatório PDF gerado automaticamente em:\n{report}\n\n"
-                    "CSV, XLSX e uma nova cópia do PDF continuam disponíveis no Histórico.",
-                )
-            except Exception as report_error:
-                logger.exception("Ensaio finalizado, mas o relatório automático falhou")
-                QMessageBox.warning(
-                    self,
-                    "Ensaio finalizado",
-                    f"O ensaio foi salvo, mas não foi possível gerar o PDF automaticamente:\n"
-                    f"{report_error}\n\nTente novamente pelo Histórico.",
-                )
+            if export == QMessageBox.StandardButton.Yes:
+                self._export_test(session.id, "xlsx")
         except Exception as exc:
             logger.exception("Falha ao finalizar ensaio")
             QMessageBox.critical(self, "Finalizar ensaio", str(exc))
@@ -721,19 +660,11 @@ class MainWindow(QMainWindow):
             f"Observações: {row['observacao_final'] or row['observacoes'] or '—'}",
         )
         definition = self._definition_from_record(row)
-        if self.test_service.current:
-            QMessageBox.information(
-                self,
-                "Ensaio ativo",
-                "Os detalhes foram exibidos, mas os cálculos do ensaio ativo continuam selecionados. "
-                "Finalize o ensaio atual antes de editar resultados históricos.",
-            )
-            return
         self.calculation_test_id = test_id
-        self.calculations.set_session(definition, "finished")
+        self.calculations.set_session(definition)
         self._refresh_calculation_history()
         self._navigate(2)
-        self.nav_buttons[2].setChecked(True)
+        self.nav_by_page[2].setChecked(True)
 
     @staticmethod
     def _definition_from_record(row) -> object:
@@ -743,7 +674,7 @@ class MainWindow(QMainWindow):
             code=row["codigo"], sample_name=row["amostra_nome"],
             sample_identification=row["amostra_identificacao"] or "",
             operator=row["operador"], description=row["descricao"] or "",
-            test_type=row["tipo"] or "Porosimetria por gás", notes=row["observacoes"] or "",
+            test_type=row["tipo"] or "Permeabilidade", notes=row["observacoes"] or "",
             expected_pressure_range=row["faixa_pressao"] or "",
             pressure_unit=row["unidade_pressao"] or "bar",
             flow_unit=row["unidade_vazao"] or "L/min",
@@ -755,6 +686,9 @@ class MainWindow(QMainWindow):
             gas_type=row["tipo_gas"] or "Helio", temperature_c=row["temperatura_c"] or 20.0,
             atmospheric_pressure_kpa=row["pressao_atmosferica_kpa"] or 101.325,
             pressure_reference=row["referencia_pressao"] or "manometrica",
+            configuration_snapshot=row["configuracao_json"] or "",
+            firmware_version=row["versao_firmware"] or "",
+            simulated=bool(row["simulado"]),
         )
 
     def _save_calculation(
@@ -770,9 +704,6 @@ class MainWindow(QMainWindow):
             self.calculation_repository.save(
                 self.calculation_test_id, calculation_type, inputs, results, notes
             )
-            self.calculations.mark_saved(calculation_type)
-            if calculation_type == "Lei de Boyle":
-                self.overview.set_porosity_ready(True)
             self._refresh_calculation_history()
             QMessageBox.information(self, "Cálculos", "Resultado salvo no ensaio.")
         except Exception as exc:
@@ -796,23 +727,16 @@ class MainWindow(QMainWindow):
         directory = QFileDialog.getExistingDirectory(self, "Diretório de exportação", str(default))
         if not directory:
             return
-        try:
-            method = {
-                "csv": self.export_service.export_csv,
-                "xlsx": self.export_service.export_xlsx,
-                "json": self.export_service.export_json,
-                "pdf": self.export_service.export_pdf,
-            }[format_name]
-            if format_name == "csv":
-                target = method(
-                    test_id, Path(directory), self.config.get("dados.separador_csv", ";")
-                )
-            else:
-                target = method(test_id, Path(directory))
-            QMessageBox.information(self, "Exportação concluída", f"Arquivo salvo em:\n{target}")
-        except Exception as exc:
-            logger.exception("Falha na exportação")
-            QMessageBox.critical(self, "Falha na exportação", str(exc))
+        method = {"csv": self.export_service.export_csv, "xlsx": self.export_service.export_xlsx, "json": self.export_service.export_json, "pdf": self.export_service.export_pdf}[format_name]
+        args: tuple[object, ...] = (test_id, Path(directory), self.config.get("dados.separador_csv", ";")) if format_name == "csv" else (test_id, Path(directory))
+        worker = ExportWorker(method, args)
+        self.export_workers.add(worker)
+        worker.completed.connect(lambda target: QMessageBox.information(self, "Exportação concluída", f"Arquivo salvo em:\n{target}"))
+        worker.failed.connect(lambda error: QMessageBox.critical(self, "Falha na exportação", error))
+        worker.finished.connect(lambda: self.export_workers.discard(worker))
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+        self.statusBar().showMessage("Exportação em andamento…", 3000)
 
     def _delete_test(self, test_id: int) -> None:
         row = self.test_repository.get(test_id)
@@ -930,6 +854,7 @@ class MainWindow(QMainWindow):
         if self.acquisition.last_message_at:
             age = (now - self.acquisition.last_message_at).total_seconds()
             self.diagnostics.values["last_age"].setText(f"{age:.1f} s")
+            self.diagnostics.values["reading_age"].setText(f"{age:.1f} s")
         self.diagnostics.values["database"].setText(
             "Operacional" if self.database.health_check() else "Falha"
         )
@@ -956,4 +881,7 @@ class MainWindow(QMainWindow):
         self._stop_serial()
         self._stop_flowmeter()
         self._stop_simulation()
+        for worker in tuple(self.export_workers):
+            worker.wait(5000)
+        self.database.close()
         event.accept()
