@@ -19,7 +19,13 @@
     "funcao": 3,
     "registrador_inicial": 58,
     "quantidade_registradores": 2,
-    "intervalo_ms": 1000
+    "tipo_dado": "uint32",
+    "ordem_bytes": "big",
+    "fator_escala": 0.001,
+    "timeout_s": 1.5,
+    "intervalo_ms": 1000,
+    "reconexao_automatica": true,
+    "configurado": true
   },
   "aquisicao": {
     "fonte_valor": "software",

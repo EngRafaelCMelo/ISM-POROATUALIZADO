@@ -42,7 +42,8 @@ class TestRepository:
                     comprimento_amostra_mm, diametro_amostra_mm, massa_amostra_g,
                     volume_geometrico_cm3, tipo_gas, temperatura_c,
                     pressao_atmosferica_kpa, referencia_pressao
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    , configuracao_json, versao_firmware, simulado
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     definition.code, sample_id, definition.sample_name,
                     definition.sample_identification, definition.operator,
@@ -55,6 +56,8 @@ class TestRepository:
                     definition.sample_mass_g, definition.bulk_volume_cm3,
                     definition.gas_type, definition.temperature_c,
                     definition.atmospheric_pressure_kpa, definition.pressure_reference,
+                    definition.configuration_snapshot, definition.firmware_version,
+                    int(definition.simulated),
                 ),
             )
             test_id = int(cur.lastrowid)

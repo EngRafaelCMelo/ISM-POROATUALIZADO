@@ -55,15 +55,21 @@ class ConfigManager:
                     user_config = json.load(handle)
                 user_sensors = user_config.get("sensores", {})
                 legacy_three_sensor_config = "vazao_alta" in user_sensors
+                legacy_flow = user_config.pop("flow_meter", None)
+                if legacy_flow:
+                    migrated_flow = user_config.setdefault("flowmeter", {})
+                    # Preserva todos os valores conhecidos, convertendo nomes antigos.
+                    aliases = {"endereco_escravo": "slave_id"}
+                    for key, value in legacy_flow.items():
+                        migrated_flow.setdefault(aliases.get(key, key), value)
                 self._migration_required = bool(
                     {"vazao_baixa", "vazao_alta"}.intersection(user_sensors)
-                    or "flow_meter" in user_config
+                    or legacy_flow
                 )
                 if "vazao" not in user_sensors and "vazao_baixa" in user_sensors:
                     user_sensors["vazao"] = user_sensors["vazao_baixa"]
                 user_sensors.pop("vazao_baixa", None)
                 user_sensors.pop("vazao_alta", None)
-                user_config.pop("flow_meter", None)
                 self._deep_update(default, user_config)
             except (OSError, json.JSONDecodeError):
                 pass
@@ -158,11 +164,10 @@ class ConfigManager:
         pressure = self.get("sensores.pressao", {})
         if pressure.get("limite_inferior") is None or pressure.get("limite_superior") is None:
             errors.append("Informe a faixa mínima e máxima do transdutor de pressão")
-        flow = self.get("flow_meter", {})
+        flow = self.get("flowmeter", {})
         required = (
-            "endereco_escravo", "baud_rate", "paridade", "stop_bits", "funcao",
-            "registrador_inicial", "quantidade_registradores", "tipo_dado",
-            "ordem_bytes", "ordem_palavras", "fator_escala", "unidade_nativa",
+            "porta", "baud_rate", "slave_id", "funcao", "registrador_inicial",
+            "quantidade_registradores", "tipo_dado", "ordem_bytes", "fator_escala",
         )
         if not flow.get("configurado") or any(flow.get(key) is None for key in required):
             errors.append("Complete e confirme a configuração Modbus do flow meter")

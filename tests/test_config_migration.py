@@ -33,7 +33,9 @@ def test_three_sensor_user_config_is_migrated(tmp_path) -> None:
     assert config["sensores"]["vazao"]["nome"] == "Vazão"
     assert "vazao_baixa" not in config["sensores"]
     assert "vazao_alta" not in config["sensores"]
-    assert config["flow_meter"]["configurado"] is False
+    assert config["flowmeter"]["configurado"] is True
+    assert config["flowmeter"]["modo"] == "automatico"
     saved = json.loads(paths.config.joinpath("user_config.json").read_text(encoding="utf-8"))
     assert set(saved["sensores"]) == {"pressao", "vazao"}
-    assert saved["flow_meter"]["configurado"] is False
+    assert saved["flowmeter"]["configurado"] is True
+    assert "flow_meter" not in saved

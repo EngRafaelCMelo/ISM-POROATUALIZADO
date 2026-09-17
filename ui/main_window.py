@@ -232,8 +232,6 @@ class MainWindow(QMainWindow):
         connection_layout.addWidget(QLabel("Flowmeter"))
         connection_layout.addWidget(self.flow_port_combo)
         connection_layout.addWidget(self.flow_connect_button)
-        connection_layout.addWidget(self.connection_options_button)
-        connection_layout.addWidget(self.connection_options)
         connection_layout.addStretch()
         connection_layout.addWidget(self.simulation_button)
         connection_layout.addWidget(self.sim_fault)
@@ -374,7 +372,11 @@ class MainWindow(QMainWindow):
         if not port:
             QMessageBox.warning(self, "Flowmeter", "Selecione a porta USB–RS485.")
             return
-        self.flowmeter_worker = FlowmeterWorker(port)
+        if port == self.port_combo.currentData():
+            QMessageBox.warning(self, "Flowmeter", "ESP32 e flowmeter precisam usar portas COM diferentes.")
+            return
+        self.config.set("flowmeter.porta", port)
+        self.flowmeter_worker = FlowmeterWorker(self.config.get("flowmeter", {}))
         self.flowmeter_worker.reading_received.connect(self.acquisition.process_flow)
         self.flowmeter_worker.communication_error.connect(self.acquisition.process_flow_error)
         self.flowmeter_worker.state_changed.connect(self._on_flowmeter_state)
@@ -494,12 +496,11 @@ class MainWindow(QMainWindow):
         self.calculations.update_measurement(measurement)
         self.diagnostics.raw.setPlainText(measurement.raw_message)
         self.diagnostics.values["ma_pressure"].setText(self._format_ma(measurement.pressure.current_ma))
-        self._last_firmware_version = measurement.firmware_version
         self.diagnostics.values["flow_health"].setText("OK" if measurement.flow.valid else "Falha")
         self.diagnostics.values["reading_age"].setText("0.0 s")
         healthy = measurement.pressure.valid and measurement.flow.valid
         self._set_badge(self.equipment_badge, "Operação normal" if healthy else "Sensor em falha", "good" if healthy else "bad")
-        if self.test_service.current:
+        if self.test_service.current and measurement.recordable:
             try:
                 recorded = self.test_service.record(measurement)
                 if recorded:
@@ -614,13 +615,13 @@ class MainWindow(QMainWindow):
             self.calculation_test_id = session.id
             self.calculations.set_session(session.definition)
             self._refresh_history()
-            export = QMessageBox.question(
+            report_directory = Path(session.definition.export_directory or self.paths.exports)
+            self.export_service.export_pdf(session.id, report_directory)
+            self.overview.set_report_ready(True)
+            QMessageBox.information(
                 self, "Ensaio finalizado",
-                f"Ensaio {session.definition.code} salvo com {session.sample_count} amostras.\n\n"
-                "Deseja exportar o relatório XLSX agora?",
+                f"Ensaio {session.definition.code} salvo com {session.sample_count} amostras.",
             )
-            if export == QMessageBox.StandardButton.Yes:
-                self._export_test(session.id, "xlsx")
         except Exception as exc:
             logger.exception("Falha ao finalizar ensaio")
             QMessageBox.critical(self, "Finalizar ensaio", str(exc))

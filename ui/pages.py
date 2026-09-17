@@ -767,17 +767,16 @@ class SettingsPage(QWidget):
         modbus = QWidget(); modbus_form = QFormLayout(modbus)
         modbus_notice = QLabel("Preencha somente com dados confirmados no manual do flow meter. Campos vazios mantêm o modo real bloqueado.")
         modbus_notice.setObjectName("warningBanner"); modbus_notice.setWordWrap(True); modbus_form.addRow(modbus_notice)
-        flow_cfg = config["flow_meter"]
+        flow_cfg = config["flowmeter"]
         self.modbus_configured = QCheckBox("Parâmetros conferidos no manual")
         self.modbus_configured.setChecked(bool(flow_cfg.get("configurado"))); modbus_form.addRow("Estado", self.modbus_configured)
         self.modbus_fields: dict[str, QLineEdit] = {}
         for key, label in [
-            ("endereco_escravo", "Endereço do escravo"), ("baud_rate", "Baud rate RS-485"),
-            ("paridade", "Paridade"), ("stop_bits", "Stop bits"), ("funcao", "Função Modbus"),
+            ("porta", "Porta USB–RS485"), ("slave_id", "Endereço do escravo"), ("baud_rate", "Baud rate RS-485"),
+            ("funcao", "Função Modbus"),
             ("registrador_inicial", "Registrador inicial"), ("quantidade_registradores", "Quantidade de registradores"),
             ("tipo_dado", "Tipo do dado"), ("ordem_bytes", "Ordem de bytes"),
-            ("ordem_palavras", "Ordem de palavras"), ("fator_escala", "Fator de escala"),
-            ("unidade_nativa", "Unidade nativa"),
+            ("fator_escala", "Fator de escala"),
         ]:
             field = QLineEdit("" if flow_cfg.get(key) is None else str(flow_cfg[key]))
             field.setPlaceholderText("Obrigatório · consultar manual"); field.setProperty("required", True)
@@ -830,7 +829,7 @@ class SettingsPage(QWidget):
                 "limite_superior": float(upper) if upper else None,
             }
         flow: dict[str, Any] = {"configurado": self.modbus_configured.isChecked()}
-        integer_keys = {"endereco_escravo", "baud_rate", "stop_bits", "funcao", "registrador_inicial", "quantidade_registradores"}
+        integer_keys = {"slave_id", "baud_rate", "funcao", "registrador_inicial", "quantidade_registradores", "intervalo_ms"}
         for key, field in self.modbus_fields.items():
             text = field.text().strip()
             flow[key] = int(text) if text and key in integer_keys else float(text) if text and key == "fator_escala" else text or None
@@ -841,7 +840,7 @@ class SettingsPage(QWidget):
                 "reconexao_automatica": self.auto_reconnect.isChecked(),
             },
             "sensores": sensors,
-            "flow_meter": flow,
+            "flowmeter": flow,
             "dados": {
                 "diretorio_exportacao": self.export_path.text().strip(),
                 "separador_csv": self.separator.currentText(),
@@ -872,7 +871,8 @@ class DiagnosticsPage(QWidget):
             ("valid", "Mensagens válidas"), ("invalid", "Mensagens inválidas"),
             ("database", "Banco de dados"), ("db_path", "Caminho do banco"),
             ("disk", "Espaço em disco"), ("version", "Versão"), ("mode", "Modo"),
-            ("ma_pressure", "Pressão (mA)"), ("flow_health", "Saúde do flow meter"), ("reading_age", "Idade da leitura"),
+            ("ma_pressure", "Pressão (mA)"), ("flow_health", "Saúde do flow meter"), ("flow_state", "Estado Modbus"),
+            ("reading_age", "Idade da leitura"),
         ]
         for index, (key, title) in enumerate(fields):
             row, col = divmod(index, 3)
