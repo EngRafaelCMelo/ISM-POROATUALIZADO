@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
 from core.constants import TestStatus
 from core.models import Measurement, TestDefinition, TestSession
 from database.repositories import EventRepository, TestRepository
+
+logger = logging.getLogger(__name__)
 
 
 class TestService:
@@ -18,6 +21,7 @@ class TestService:
         if self.current and self.current.status in (TestStatus.RUNNING, TestStatus.PAUSED):
             raise RuntimeError("Já existe um ensaio ativo")
         self.current = self.tests.create(definition)
+        logger.info("Ensaio iniciado: %s | simulado=%s", definition.code, definition.simulated)
         return self.current
 
     def record(self, measurement: Measurement) -> bool:
@@ -45,6 +49,7 @@ class TestService:
         if not self.current:
             raise RuntimeError("Nenhum ensaio ativo")
         self.tests.finish(self.current.id, final_note)
+        logger.info("Ensaio finalizado: %s", self.current.definition.code)
         self.current.status = TestStatus.FINISHED
         self.current.ended_at = datetime.now()
         result = self.current

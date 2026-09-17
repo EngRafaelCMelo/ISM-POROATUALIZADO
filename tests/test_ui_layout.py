@@ -1,21 +1,23 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
-import json
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QPushButton
 
+from ui.dialogs.test_dialog import TestSetupDialog as SetupDialog
 from ui.pages import (
     DiagnosticsPage,
     GraphsPage,
     OverviewPage,
     SettingsPage,
+)
+from ui.pages import (
     TestPage as SupervisorTestPage,
 )
-from ui.dialogs.test_dialog import TestSetupDialog as SetupDialog
 
 
 def test_buttons_reserve_vertical_space_for_font() -> None:
@@ -32,9 +34,7 @@ def test_buttons_reserve_vertical_space_for_font() -> None:
 def test_hardware_pages_show_one_pressure_and_one_flow() -> None:
     app = QApplication.instance() or QApplication([])
     config = json.loads(
-        (Path(__file__).parents[1] / "config" / "default_config.json").read_text(
-            encoding="utf-8"
-        )
+        (Path(__file__).parents[1] / "config" / "default_config.json").read_text(encoding="utf-8")
     )
     overview = OverviewPage(config["sensores"])
     graphs = GraphsPage()

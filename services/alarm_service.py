@@ -28,9 +28,7 @@ class AlarmService:
         return [alarm for alarm in alarms if self._not_duplicate(alarm)]
 
     def communication_alarm(self, message: str = "Perda de comunicação") -> Alarm | None:
-        alarm = Alarm(
-            datetime.now(), "Comunicação", Severity.CRITICAL, "comunicação", message
-        )
+        alarm = Alarm(datetime.now(), "Comunicação", Severity.CRITICAL, "comunicação", message)
         return alarm if self._not_duplicate(alarm, cooldown=5.0) else None
 
     def _sensor_alarms(
@@ -41,40 +39,108 @@ class AlarmService:
         current = reading.current_ma
         if current is not None:
             if current < 3.6:
-                alarms.append(Alarm(timestamp, label, Severity.CRITICAL, "corrente",
-                                    "Corrente abaixo de 3,6 mA", current, 3.6))
+                alarms.append(
+                    Alarm(
+                        timestamp,
+                        label,
+                        Severity.CRITICAL,
+                        "corrente",
+                        "Corrente abaixo de 3,6 mA",
+                        current,
+                        3.6,
+                    )
+                )
             elif current < 4.0:
-                alarms.append(Alarm(timestamp, label, Severity.WARNING, "corrente",
-                                    "Corrente abaixo da faixa nominal", current, 4.0))
+                alarms.append(
+                    Alarm(
+                        timestamp,
+                        label,
+                        Severity.WARNING,
+                        "corrente",
+                        "Corrente abaixo da faixa nominal",
+                        current,
+                        4.0,
+                    )
+                )
             elif current > 20.5:
-                alarms.append(Alarm(timestamp, label, Severity.CRITICAL, "corrente",
-                                    "Corrente acima de 20,5 mA", current, 20.5))
+                alarms.append(
+                    Alarm(
+                        timestamp,
+                        label,
+                        Severity.CRITICAL,
+                        "corrente",
+                        "Corrente acima de 20,5 mA",
+                        current,
+                        20.5,
+                    )
+                )
             elif current > 20.0:
-                alarms.append(Alarm(timestamp, label, Severity.ALARM, "corrente",
-                                    "Corrente acima da faixa nominal", current, 20.0))
+                alarms.append(
+                    Alarm(
+                        timestamp,
+                        label,
+                        Severity.ALARM,
+                        "corrente",
+                        "Corrente acima da faixa nominal",
+                        current,
+                        20.0,
+                    )
+                )
         value = reading.value
         if value is None:
             detail = f" ({reading.device_status})" if reading.device_status else ""
-            alarms.append(Alarm(
-                timestamp,
-                label,
-                Severity.CRITICAL,
-                "sensor",
-                f"Leitura ausente{detail}",
-            ))
+            alarms.append(
+                Alarm(
+                    timestamp,
+                    label,
+                    Severity.CRITICAL,
+                    "sensor",
+                    f"Leitura ausente{detail}",
+                )
+            )
             return alarms
         cfg = self.config[sensor]
         lower, upper = cfg.get("limite_inferior"), cfg.get("limite_superior")
-        if lower is not None and value < float(lower) or upper is not None and value > float(upper):
+        validate_range = bool(cfg.get("validar_faixa", True))
+        if validate_range and (
+            lower is not None and value < float(lower) or upper is not None and value > float(upper)
+        ):
             limit = lower if lower is not None and value < float(lower) else upper
-            alarms.append(Alarm(timestamp, label, Severity.ALARM, "faixa",
-                                "Valor fora da faixa configurada", value, float(limit)))
-        elif cfg.get("critico") is not None and value >= float(cfg["critico"]):
-            alarms.append(Alarm(timestamp, label, Severity.CRITICAL, "processo",
-                                "Limite crítico atingido", value, float(cfg["critico"])))
-        elif cfg.get("alerta") is not None and value >= float(cfg["alerta"]):
-            alarms.append(Alarm(timestamp, label, Severity.WARNING, "processo",
-                                "Limite de atenção atingido", value, float(cfg["alerta"])))
+            alarms.append(
+                Alarm(
+                    timestamp,
+                    label,
+                    Severity.ALARM,
+                    "faixa",
+                    "Valor fora da faixa configurada",
+                    value,
+                    float(limit),
+                )
+            )
+        elif validate_range and cfg.get("critico") is not None and value >= float(cfg["critico"]):
+            alarms.append(
+                Alarm(
+                    timestamp,
+                    label,
+                    Severity.CRITICAL,
+                    "processo",
+                    "Limite crítico atingido",
+                    value,
+                    float(cfg["critico"]),
+                )
+            )
+        elif validate_range and cfg.get("alerta") is not None and value >= float(cfg["alerta"]):
+            alarms.append(
+                Alarm(
+                    timestamp,
+                    label,
+                    Severity.WARNING,
+                    "processo",
+                    "Limite de atenção atingido",
+                    value,
+                    float(cfg["alerta"]),
+                )
+            )
 
         history = self.history[sensor]
         if history:
@@ -82,16 +148,43 @@ class AlarmService:
             dt = max(0.001, (timestamp - previous_time).total_seconds())
             tolerance = float(cfg.get("tolerancia", 0.1))
             if abs(value - previous) / dt > tolerance * 10:
-                alarms.append(Alarm(timestamp, label, Severity.WARNING, "variação",
-                                    "Mudança muito brusca", value, tolerance * 10))
+                alarms.append(
+                    Alarm(
+                        timestamp,
+                        label,
+                        Severity.WARNING,
+                        "variação",
+                        "Mudança muito brusca",
+                        value,
+                        tolerance * 10,
+                    )
+                )
         history.append((timestamp, value))
         values = [item[1] for item in history]
         if len(values) >= 10 and pstdev(values) > float(cfg.get("tolerancia", 0.1)) * 3:
-            alarms.append(Alarm(timestamp, label, Severity.WARNING, "ruído",
-                                "Ruído elevado", pstdev(values), float(cfg.get("tolerancia", 0.1)) * 3))
+            alarms.append(
+                Alarm(
+                    timestamp,
+                    label,
+                    Severity.WARNING,
+                    "ruído",
+                    "Ruído elevado",
+                    pstdev(values),
+                    float(cfg.get("tolerancia", 0.1)) * 3,
+                )
+            )
         if len(values) >= 20 and max(values) - min(values) < 1e-6:
-            alarms.append(Alarm(timestamp, label, Severity.WARNING, "constante",
-                                "Valor constante por tempo excessivo", value, None))
+            alarms.append(
+                Alarm(
+                    timestamp,
+                    label,
+                    Severity.WARNING,
+                    "constante",
+                    "Valor constante por tempo excessivo",
+                    value,
+                    None,
+                )
+            )
         return alarms
 
     def _not_duplicate(self, alarm: Alarm, cooldown: float = 20.0) -> bool:

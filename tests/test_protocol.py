@@ -6,121 +6,171 @@ from datetime import datetime, timedelta
 import pytest
 
 from communication.protocol_parser import ProtocolError, ProtocolParser
+from communication.serial_manager import FlowReading
 from core.constants import ReadingQuality
 from services.acquisition_service import AcquisitionService
 
 
-def test_complete_json_message(config_data: dict) -> None:
-    parser = ProtocolParser(config_data["sensores"], "comparar")
-    raw = json.dumps({
+def payload(**changes) -> dict:
+    message = {
+        "schema_version": 1,
         "timestamp_ms": 152340,
+        "sequence": 42,
+        "firmware_version": "2.2.0",
+        "pressao_raw": 12345,
         "pressao_ma": 12.0,
-        "pressao": 50.0,
+        "pressao": (12.0 - 3.95) / (20.0 - 3.95) * 400.0,
+        "pressao_unidade": "psi",
+        "pressao_valida": True,
         "pressao_status": "OK",
-        "vazao": 1.25,
-        "vazao_status": "OK",
-        "flowmeter_ok": True,
         "status": "OK",
-    })
-    measurement = parser.parse(raw)
+    }
+    message.update(changes)
+    return message
+
+
+def test_flat_pressure_contract(config_data: dict) -> None:
+    measurement = ProtocolParser(config_data["sensores"], "comparar").parse(json.dumps(payload()))
     assert measurement.device_timestamp_ms == 152340
-    assert measurement.pressure.value == 50.0
-    assert measurement.pressure.calculated_value == pytest.approx(50.0)
+    assert measurement.sequence == 42
+    assert measurement.schema_version == 1
+    assert measurement.firmware_version == "2.2.0"
+    assert measurement.pressure.value == pytest.approx((12.0 - 3.95) / (20.0 - 3.95) * 400.0)
+    assert measurement.pressure.raw_value == 12345
+    assert measurement.pressure.unit == "psi"
     assert measurement.pressure.quality == ReadingQuality.VALID
-    assert measurement.flow.value == pytest.approx(1.25)
-    assert measurement.pressure.device_status == "OK"
-    assert measurement.flow.device_status == "OK"
-    assert measurement.flowmeter_ok is True
-
-
-def test_modbus_example_converts_uint32_big_endian_to_l_min(config_data: dict) -> None:
-    # Corpo da resposta: 0x000000F0 = 240 milésimos de L/min.
-    response_body = bytes.fromhex("01 03 04 00 00 00 F0")
-    crc = 0xFFFF
-    for byte in response_body:
-        crc ^= byte
-        for _ in range(8):
-            crc = (crc >> 1) ^ 0xA001 if crc & 1 else crc >> 1
-    response = response_body + bytes((crc & 0xFF, crc >> 8))
-    assert response.hex(" ").upper() == "01 03 04 00 00 00 F0 FA 77"
-    bruto = int.from_bytes(response[3:7], "big")
-    assert bruto / 1000.0 == pytest.approx(0.240)
-
-
-def test_flowmeter_false_does_not_present_zero_as_measurement(config_data: dict) -> None:
-    parser = ProtocolParser(config_data["sensores"])
-    measurement = parser.parse('{"pressao":50,"vazao":null,"flowmeter_ok":false}')
     assert measurement.flow.value is None
-    assert measurement.flowmeter_ok is False
 
 
-def test_reduced_message_is_accepted(config_data: dict) -> None:
-    parser = ProtocolParser(config_data["sensores"])
-    measurement = parser.parse('{"pressao":34.2,"vazao_baixa":0.85}')
-    assert measurement.pressure.current_ma is None
-    assert measurement.pressure.quality == ReadingQuality.VALID
-    assert measurement.flow.value == pytest.approx(0.85)
-
-
-def test_current_flow_names_take_precedence_over_legacy_aliases(config_data: dict) -> None:
-    parser = ProtocolParser(config_data["sensores"])
-    measurement = parser.parse(
-        '{"vazao":1.5,"vazao_baixa":0.5,"vazao_ma":12,"vazao_baixa_ma":8}'
-    )
-    assert measurement.flow.value == pytest.approx(1.5)
-    assert measurement.flow.current_ma == pytest.approx(12)
-
-
-@pytest.mark.parametrize("raw", [
-    '{"pressao":',
-    "[]",
-    '{"status":"OK"}',
-    '{"pressao":"não-numérico"}',
-])
-def test_invalid_or_incomplete_message(raw: str, config_data: dict) -> None:
+@pytest.mark.parametrize(
+    "raw",
+    [
+        '{"pressao":',
+        "[]",
+        json.dumps({"status": "OK"}),
+        json.dumps(payload(pressao="não-numérico")),
+        json.dumps(payload(schema_version=99)),
+        json.dumps(payload(pressao_valida="sim")),
+    ],
+)
+def test_invalid_partial_or_missing_json(raw: str, config_data: dict) -> None:
     with pytest.raises(ProtocolError):
         ProtocolParser(config_data["sensores"]).parse(raw)
 
 
+def test_declared_invalid_pressure_is_not_accepted(config_data: dict) -> None:
+    measurement = ProtocolParser(config_data["sensores"]).parse(
+        json.dumps(
+            payload(pressao=None, pressao_valida=False, pressao_status="ADS1115_UNAVAILABLE")
+        )
+    )
+    assert measurement.pressure.value is None
+    assert not measurement.pressure.valid
+    assert measurement.pressure.quality == ReadingQuality.INVALID
+
+
 def test_software_conversion_mode(config_data: dict) -> None:
-    parser = ProtocolParser(config_data["sensores"], "software")
-    measurement = parser.parse('{"pressao_ma":12,"pressao":99}')
-    assert measurement.pressure.value == pytest.approx(50)
+    measurement = ProtocolParser(config_data["sensores"], "software").parse(
+        json.dumps(payload(pressao_ma=12, pressao=99))
+    )
+    assert measurement.pressure.value == pytest.approx((12.0 - 3.95) / (20.0 - 3.95) * 400.0)
 
 
-def test_compare_mode_warns_when_device_and_current_disagree(config_data: dict) -> None:
-    parser = ProtocolParser(config_data["sensores"], "comparar")
-    measurement = parser.parse('{"pressao_ma":12,"pressao":60,"vazao":1}')
-    assert measurement.pressure.value == pytest.approx(60)
-    assert measurement.pressure.calculated_value == pytest.approx(50)
+def test_compare_mode_warns_when_values_disagree(config_data: dict) -> None:
+    measurement = ProtocolParser(config_data["sensores"], "comparar").parse(
+        json.dumps(payload(pressao_ma=12, pressao=60))
+    )
     assert measurement.pressure.quality == ReadingQuality.WARNING
 
 
-def test_current_firmware_message_is_accepted(config_data: dict) -> None:
-    parser = ProtocolParser(config_data["sensores"])
-    measurement = parser.parse(
-        '{"timestamp_ms":1000,"sequence":1,"pressao_ma":12.0,'
-        '"pressao":50.0,"pressao_status":"OK","vazao_baixa":null,'
-        '"vazao_baixa_status":"AGUARDANDO_PROTOCOLO_RS485",'
-        '"status":"PARCIAL_SEM_VAZAO"}'
-    )
-    assert measurement.pressure.value == pytest.approx(50.0)
-    assert measurement.pressure.quality == ReadingQuality.VALID
-    assert measurement.flow.value is None
-    assert measurement.flow.device_status == "AGUARDANDO_PROTOCOLO_RS485"
-    assert measurement.communication_state == "PARCIAL_SEM_VAZAO"
-    assert measurement.to_db_tuple(1)[10] == ReadingQuality.MISSING.value
+def test_flow_event_does_not_change_pressure_timestamp(config_data: dict) -> None:
+    service = AcquisitionService(config_data)
+    service.process_real(json.dumps(payload()))
+    pressure_timestamp = service.latest_pressure.timestamp
+    flow_timestamp = datetime.now() + timedelta(seconds=1)
+    service.process_flow(FlowReading(0.240, 240, flow_timestamp))
+    combined = service.emit_combined_measurement()
+    assert combined is not None
+    assert combined.pressure.timestamp == pressure_timestamp
+    assert combined.flow.timestamp == flow_timestamp
+    service.stop()
+
+
+def test_pressure_event_does_not_change_flow_timestamp(config_data: dict) -> None:
+    service = AcquisitionService(config_data)
+    flow_timestamp = datetime.now() - timedelta(milliseconds=200)
+    service.process_flow(FlowReading(0.240, 240, flow_timestamp))
+    service.process_real(json.dumps(payload(sequence=43)))
+    combined = service.emit_combined_measurement()
+    assert combined is not None
+    assert combined.flow.timestamp == flow_timestamp
+    service.stop()
+
+
+def test_flow_is_not_rejected_by_a_presumed_maximum(config_data: dict) -> None:
+    service = AcquisitionService(config_data)
+    service.process_flow(FlowReading(1250.0, 1_250_000, datetime.now()))
+    assert service.latest_flow.valid
+    assert service.latest_flow.value == 1250.0
+    service.stop()
+
+
+def test_stale_pressure_is_not_valid(config_data: dict) -> None:
+    service = AcquisitionService(config_data)
+    service.process_real(json.dumps(payload()))
+    service.latest_pressure.timestamp = datetime.now() - timedelta(seconds=10)
+    service.process_flow(FlowReading(0.240, 240, datetime.now()))
+    combined = service.emit_combined_measurement()
+    assert combined is not None
+    assert combined.pressure.quality == ReadingQuality.STALE
+    assert not combined.pressure.valid
+    service.stop()
 
 
 def test_acquisition_recovers_after_communication_loss(config_data: dict) -> None:
     service = AcquisitionService(config_data)
     timeouts: list[str] = []
     service.timeout_detected.connect(timeouts.append)
-    service.process_real('{"pressao":1}')
+    service.process_real(json.dumps(payload()))
     service.last_message_at = datetime.now() - timedelta(seconds=4)
     service._check_timeout()
-    assert service._timeout_announced
-    assert timeouts
-    service.process_real('{"pressao":2}')
+    assert service._timeout_announced and timeouts
+    service.process_real(json.dumps(payload(sequence=43)))
     assert not service._timeout_announced
     assert service.valid_messages == 2
+    service.stop()
+
+
+def test_flow_protocol_error_preserves_timestamp_but_invalidates_reading(
+    config_data: dict,
+) -> None:
+    service = AcquisitionService(config_data)
+    timestamp = datetime.now()
+    service.process_flow(FlowReading(0.240, 240, timestamp))
+    service.process_flow_error("crc_invalido: CRC inválido")
+    assert service.latest_flow.timestamp == timestamp
+    assert service.latest_flow.value == pytest.approx(0.240)
+    assert service.latest_flow.quality == ReadingQuality.INVALID
+    assert service.latest_flow.device_status == "CRC_INVALIDO"
+    service.stop()
+
+
+def test_flow_disconnect_and_automatic_stale_are_distinct(config_data: dict) -> None:
+    service = AcquisitionService(config_data)
+    service.process_flow(FlowReading(0.240, 240, datetime.now() - timedelta(seconds=10)))
+    service._check_timeout()
+    assert service.latest_flow.quality == ReadingQuality.STALE
+
+    service.process_flow_error("porta_desconectada: cabo removido")
+    assert service.latest_flow.quality == ReadingQuality.DISCONNECTED
+    service.stop()
+
+
+def test_esp32_disconnect_invalidates_pressure_immediately(config_data: dict) -> None:
+    service = AcquisitionService(config_data)
+    service.process_real(json.dumps(payload()))
+    timestamp = service.latest_pressure.timestamp
+    service.process_pressure_connection(False, "cabo removido")
+    assert service.latest_pressure.timestamp == timestamp
+    assert service.latest_pressure.quality == ReadingQuality.DISCONNECTED
+    service.stop()

@@ -23,12 +23,14 @@ def test_finishing_test_generates_pdf_automatically(tmp_path, monkeypatch) -> No
     database.initialize()
     window = MainWindow(config, database, paths)
     assert len(window.advanced_nav_buttons) == 3
-    session = window.test_service.start(Definition(
-        code="ENS-2026-0200",
-        sample_name="Amostra relatório",
-        test_type="Permeabilidade",
-        export_directory=str(paths.exports),
-    ))
+    session = window.test_service.start(
+        Definition(
+            code="ENS-2026-0200",
+            sample_name="Amostra relatório",
+            test_type="Permeabilidade",
+            export_directory=str(paths.exports),
+        )
+    )
     window.calculation_test_id = session.id
     window.calculations.set_session(session.definition, "active")
 

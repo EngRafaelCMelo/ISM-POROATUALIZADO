@@ -1,21 +1,11 @@
-# Firmware ESP32 do permeabilímetro
+# Firmware ESP32 — pressão
 
-Firmware de produção para exatamente dois instrumentos:
+Firmware 2.2.0 da arquitetura de produção. O ESP32 lê **somente** o
+transdutor de pressão pelo ADS1115. Não há UART, RS-485 nem Modbus neste
+firmware. O flowmeter deve ser conectado diretamente ao computador por um
+adaptador USB–RS485.
 
-- um transdutor de pressão 4–20 mA lido pelo ADS1115;
-- um flow meter lido em Modbus RTU através do MAX3485.
-
-O ESP32 envia uma linha JSON por segundo ao supervisório através da USB em
-115200 baud.
-
-## Bibliotecas
-
-Instale pela Arduino IDE:
-
-- **Adafruit ADS1X15**, da Adafruit;
-- pacote de placas **esp32**, da Espressif Systems.
-
-## Ligações do ADS1115
+## Ligações
 
 | ADS1115 | ESP32 / sinal |
 |---|---|
@@ -23,69 +13,20 @@ Instale pela Arduino IDE:
 | GND | GND |
 | SDA | GPIO 21 |
 | SCL | GPIO 22 |
-| ADDR | GND, endereço 0x48 |
-| A0 | tensão sobre o resistor shunt |
+| ADDR | GND (0x48) |
+| A0 | tensão sobre resistor shunt de 149,7 Ω |
 
-O sinal 4–20 mA **não deve ser ligado diretamente** ao ADC. O firmware está
-configurado para um resistor shunt de precisão de **150 ohms, 0,1%**, que gera
-0,6 V em 4 mA e 3,0 V em 20 mA. Use potência nominal de pelo menos 0,25 W.
+O laço de 4–20 mA não pode ser ligado diretamente ao ESP32. A calibração de
+produção usa `3,95 mA = 0 psi` e `20,00 mA = 400 psi`.
 
-Ligação típica do laço:
+## Contrato serial
 
-```text
-+24 V ---- (+ transdutor -) ---- A0/ADS1115 ---- resistor 150 ohms ---- 0 V
-                                      |
-                                  tensão medida
-```
-
-O GND do ADS1115 precisa ter a mesma referência do lado inferior do resistor.
-Em instalações industriais com terras diferentes, use isolamento apropriado.
-
-## Ligações do MAX3485
-
-| MAX3485 | ESP32 / barramento |
-|---|---|
-| VCC | 3V3 |
-| GND | GND |
-| RO | GPIO 16 (RX2) |
-| DI | GPIO 17 (TX2) |
-| DE / /RE | Não utilizado: módulo com direção automática |
-| A | A/RS-485 do medidor |
-| B | B/RS-485 do medidor |
-
-Use cabo de par trançado. Em um barramento longo, coloque terminação de 120
-ohms somente nas duas extremidades. Alguns fabricantes invertem a nomenclatura
-A/B; confira o manual do medidor.
-
-## Configuração obrigatória do flow meter
-
-Antes de gravar, ajuste no início do arquivo `.ino`:
-
-- `MODBUS_SLAVE_ID`;
-- `MODBUS_BAUD_RATE`;
-- `MODBUS_SERIAL_CONFIG` (`SERIAL_8N1`, `SERIAL_8E1`, etc.);
-- `REGISTRADOR_VAZAO`;
-- função `0x03`, registradores `0x003A`–`0x003B`, `UINT32` big-endian e escala
-  `0,001 L/min` já estão fixos conforme o flowmeter validado.
-
-O endereço passado à biblioteca é baseado em zero. Por exemplo, o registrador
-40001 descrito no manual normalmente corresponde ao endereço `0`; confirme na
-tabela Modbus do fabricante.
-
-## Saída enviada ao programa
-
-Operação normal:
+USB serial, 115200 baud, uma linha JSON UTF-8 por segundo, sem texto de debug:
 
 ```json
-{"timestamp_ms":152340,"sequence":153,"pressao_ma":12.000,"pressao":50.000,"pressao_status":"OK","vazao":0.240,"flowmeter_ok":true,"vazao_status":"OK","status":"OK"}
+{"schema_version":1,"timestamp_ms":123456,"sequence":42,"firmware_version":"2.2.0","pressao_raw":12345,"pressao_ma":12.34,"pressao":209.10,"pressao_unidade":"psi","pressao_valida":true,"pressao_status":"OK","status":"OK"}
 ```
 
-Se o flow meter não responder, a pressão continua sendo enviada:
-
-```json
-{"timestamp_ms":153340,"sequence":154,"pressao_ma":12.000,"pressao":50.000,"pressao_status":"OK","vazao":null,"flowmeter_ok":false,"vazao_status":"ERRO_MODBUS_0xE2","status":"PARCIAL_SEM_VAZAO"}
-```
-
-Não imprima textos de depuração em `Serial`, pois a mesma porta é usada pelo
-protocolo JSON. Para depuração adicional, use outra UART ou remova os textos
-antes de conectar ao supervisório.
+Campos indisponíveis são enviados como `null`; o firmware nunca inventa
+valores em modo real. Após três segundos sem conversão nova, a amostra é
+invalidada como `PRESSURE_STALE` e o ADS1115 é reinicializado periodicamente.

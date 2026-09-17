@@ -9,10 +9,15 @@ class MarkerDialog(QDialog):
         self.setWindowTitle("Adicionar marcação")
         layout = QFormLayout(self)
         self.category = QComboBox()
-        self.category.addItems([
-            "Aplicação de pressão", "Troca de faixa", "Estabilização",
-            "Observação do operador", "Ocorrência inesperada",
-        ])
+        self.category.addItems(
+            [
+                "Aplicação de pressão",
+                "Troca de faixa",
+                "Estabilização",
+                "Observação do operador",
+                "Ocorrência inesperada",
+            ]
+        )
         self.comment = QTextEdit()
         self.comment.setMinimumWidth(420)
         self.comment.setMaximumHeight(100)
@@ -22,6 +27,8 @@ class MarkerDialog(QDialog):
             QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Save
         )
         buttons.button(QDialogButtonBox.StandardButton.Save).setText("Registrar")
-        buttons.accepted.connect(lambda: self.accept() if self.comment.toPlainText().strip() else None)
+        buttons.accepted.connect(
+            lambda: self.accept() if self.comment.toPlainText().strip() else None
+        )
         buttons.rejected.connect(self.reject)
         layout.addRow(buttons)

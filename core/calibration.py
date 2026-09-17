@@ -29,7 +29,9 @@ def sample_stability(currents: list[float], max_stddev: float = 0.05) -> dict[st
     }
 
 
-def fit_calibration(points: list[tuple[float, float]], stability: list[float] | None = None) -> CalibrationResult:
+def fit_calibration(
+    points: list[tuple[float, float]], stability: list[float] | None = None
+) -> CalibrationResult:
     if len(points) < 2:
         raise ValueError("São necessários pelo menos dois pontos")
     xs = [p[0] for p in points]

@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-PRESSURE_TO_PA = {"Pa": 1.0, "kPa": 1_000.0, "MPa": 1_000_000.0, "bar": 100_000.0, "psi": 6_894.757293168}
+PRESSURE_TO_PA = {
+    "Pa": 1.0,
+    "kPa": 1_000.0,
+    "MPa": 1_000_000.0,
+    "bar": 100_000.0,
+    "psi": 6_894.757293168,
+}
 FLOW_TO_L_MIN = {"L/min": 1.0, "mL/min": 0.001}
 
 

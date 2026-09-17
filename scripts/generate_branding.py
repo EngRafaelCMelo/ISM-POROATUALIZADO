@@ -1,4 +1,5 @@
 """Gera derivados determinísticos da marca oficial sem redesenhar a arte."""
+
 from __future__ import annotations
 
 import argparse
@@ -19,13 +20,25 @@ def content_bbox(image: Image.Image, threshold: int = 246) -> tuple[int, int, in
 def green_symbol_bbox(image: Image.Image) -> tuple[int, int, int, int]:
     rgb = image.convert("RGB")
     mask = Image.new("L", rgb.size)
-    mask.putdata([255 if green > red * 1.12 and green > blue * 1.08 and green > 55 else 0 for red, green, blue in rgb.getdata()])
+    mask.putdata(
+        [
+            255 if green > red * 1.12 and green > blue * 1.08 and green > 55 else 0
+            for red, green, blue in rgb.getdata()
+        ]
+    )
     return mask.getbbox() or content_bbox(image)
 
 
 def padded_crop(image: Image.Image, bbox: tuple[int, int, int, int], padding: int) -> Image.Image:
     left, top, right, bottom = bbox
-    return image.crop((max(0, left - padding), max(0, top - padding), min(image.width, right + padding), min(image.height, bottom + padding)))
+    return image.crop(
+        (
+            max(0, left - padding),
+            max(0, top - padding),
+            min(image.width, right + padding),
+            min(image.height, bottom + padding),
+        )
+    )
 
 
 def white_to_alpha(image: Image.Image, start: int = 238) -> Image.Image:
@@ -33,16 +46,27 @@ def white_to_alpha(image: Image.Image, start: int = 238) -> Image.Image:
     pixels = []
     for red, green, blue, _ in rgba.getdata():
         distance = 255 - min(red, green, blue)
-        alpha = 0 if min(red, green, blue) >= 252 else min(255, max(0, round(distance * 255 / (255 - start))))
+        alpha = (
+            0
+            if min(red, green, blue) >= 252
+            else min(255, max(0, round(distance * 255 / (255 - start))))
+        )
         pixels.append((red, green, blue, alpha))
     rgba.putdata(pixels)
     return rgba
 
 
 def fit_canvas(image: Image.Image, size: tuple[int, int], transparent: bool) -> Image.Image:
-    canvas = Image.new("RGBA" if transparent else "RGB", size, (255, 255, 255, 0) if transparent else "white")
-    copy = image.copy(); copy.thumbnail((size[0] - 48, size[1] - 48), Image.Resampling.LANCZOS)
-    canvas.paste(copy, ((size[0] - copy.width) // 2, (size[1] - copy.height) // 2), copy if copy.mode == "RGBA" else None)
+    canvas = Image.new(
+        "RGBA" if transparent else "RGB", size, (255, 255, 255, 0) if transparent else "white"
+    )
+    copy = image.copy()
+    copy.thumbnail((size[0] - 48, size[1] - 48), Image.Resampling.LANCZOS)
+    canvas.paste(
+        copy,
+        ((size[0] - copy.width) // 2, (size[1] - copy.height) // 2),
+        copy if copy.mode == "RGBA" else None,
+    )
     return canvas
 
 
@@ -51,7 +75,8 @@ def main() -> None:
     parser.add_argument("source", type=Path)
     parser.add_argument("destination", type=Path)
     args = parser.parse_args()
-    destination = args.destination; source_dir = destination / "source"
+    destination = args.destination
+    source_dir = destination / "source"
     source_dir.mkdir(parents=True, exist_ok=True)
     preserved = source_dir / "ism_logo_original.jpeg"
     shutil.copy2(args.source, preserved)
@@ -70,7 +95,8 @@ def main() -> None:
 
     icon_master = fit_canvas(symbol_transparent, (256, 256), transparent=True)
     icon_master.save(
-        destination / "ism_app_icon.ico", format="ICO",
+        destination / "ism_app_icon.ico",
+        format="ICO",
         sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)],
     )
 

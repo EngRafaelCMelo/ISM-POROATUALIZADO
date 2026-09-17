@@ -33,7 +33,15 @@ def physical_spin(suffix: str, maximum: float = 1_000_000.0, decimals: int = 4) 
 
 
 class TestSetupDialog(QDialog):
-    def __init__(self, code: str, default_export: Path, parent=None):
+    def __init__(
+        self,
+        code: str,
+        default_export: Path,
+        parent=None,
+        *,
+        pressure_unit: str = "psi",
+        expected_pressure_range: str = "0–400 psi",
+    ):
         super().__init__(parent)
         self.setWindowTitle("Novo ensaio")
         self.setMinimumSize(650, 650)
@@ -54,11 +62,13 @@ class TestSetupDialog(QDialog):
         self.notes = QTextEdit()
         self.notes.setMaximumHeight(65)
         self.expected_range = QLineEdit()
+        self.expected_range.setText(expected_pressure_range)
         self.expected_range.setPlaceholderText("Use a faixa confirmada no manual do transdutor")
         self.pressure_unit = QComboBox()
         self.pressure_unit.addItems(["bar", "kPa", "MPa", "psi"])
+        self.pressure_unit.setCurrentText(pressure_unit)
         self.flow_unit = QComboBox()
-        self.flow_unit.addItems(["L/min", "mL/min"])
+        self.flow_unit.addItems(["NL/min", "L/min", "mL/min"])
         self.interval = QDoubleSpinBox()
         self.interval.setRange(0.05, 60)
         self.interval.setValue(1.0)
@@ -70,12 +80,17 @@ class TestSetupDialog(QDialog):
         export_row.addWidget(self.export_dir)
         export_row.addWidget(browse)
         for label, widget in [
-            ("Código do ensaio*", self.code), ("Nome da amostra*", self.sample),
-            ("Identificação", self.identification), ("Operador*", self.operator),
-            ("Descrição", self.description), ("Tipo de ensaio", self.test_type),
-            ("Observações", self.notes), ("Faixa esperada", self.expected_range),
+            ("Código do ensaio*", self.code),
+            ("Nome da amostra*", self.sample),
+            ("Identificação", self.identification),
+            ("Operador*", self.operator),
+            ("Descrição", self.description),
+            ("Tipo de ensaio", self.test_type),
+            ("Observações", self.notes),
+            ("Faixa esperada", self.expected_range),
             ("Unidade de pressão", self.pressure_unit),
-            ("Unidade de vazão", self.flow_unit), ("Intervalo de aquisição", self.interval),
+            ("Unidade de vazão", self.flow_unit),
+            ("Intervalo de aquisição", self.interval),
         ]:
             form.addRow(label, widget)
         form.addRow("Diretório de exportação", export_row)
@@ -152,7 +167,8 @@ class TestSetupDialog(QDialog):
         if any(not field.text().strip() for field in required):
             for field in required:
                 field.setProperty("validationError", not field.text().strip())
-                field.style().unpolish(field); field.style().polish(field)
+                field.style().unpolish(field)
+                field.style().polish(field)
             return
         self.accept()
 

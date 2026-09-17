@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
-
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA_SQL = """
 PRAGMA journal_mode=WAL;
@@ -13,7 +12,7 @@ CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER NOT NULL
 );
 INSERT INTO schema_version(version)
-SELECT 3 WHERE NOT EXISTS (SELECT 1 FROM schema_version);
+SELECT 4 WHERE NOT EXISTS (SELECT 1 FROM schema_version);
 
 CREATE TABLE IF NOT EXISTS usuarios (
     id INTEGER PRIMARY KEY,
@@ -77,10 +76,14 @@ CREATE TABLE IF NOT EXISTS medicoes (
     pressao_ads_raw REAL,
     unidade_pressao TEXT,
     pressao_valida INTEGER,
+    timestamp_pressao TEXT,
+    status_pressao TEXT,
     vazao_raw REAL,
     vazao REAL,
     unidade_vazao TEXT,
     vazao_valida INTEGER,
+    timestamp_vazao TEXT,
+    status_vazao TEXT,
     sequencia INTEGER,
     versao_schema INTEGER,
     versao_firmware TEXT,
@@ -186,18 +189,27 @@ TEST_COLUMNS: dict[str, str] = {
 }
 
 MEASUREMENT_COLUMNS: dict[str, str] = {
-    "pressao_ads_raw": "REAL", "unidade_pressao": "TEXT", "pressao_valida": "INTEGER",
-    "vazao_raw": "REAL", "vazao": "REAL", "unidade_vazao": "TEXT", "vazao_valida": "INTEGER",
-    "sequencia": "INTEGER", "versao_schema": "INTEGER", "versao_firmware": "TEXT",
+    "pressao_ads_raw": "REAL",
+    "unidade_pressao": "TEXT",
+    "pressao_valida": "INTEGER",
+    "timestamp_pressao": "TEXT",
+    "status_pressao": "TEXT",
+    "vazao_raw": "REAL",
+    "vazao": "REAL",
+    "unidade_vazao": "TEXT",
+    "vazao_valida": "INTEGER",
+    "timestamp_vazao": "TEXT",
+    "status_vazao": "TEXT",
+    "sequencia": "INTEGER",
+    "versao_schema": "INTEGER",
+    "versao_firmware": "TEXT",
     "simulado": "INTEGER NOT NULL DEFAULT 0",
 }
 
 
 def apply_migrations(connection: sqlite3.Connection) -> None:
     """Atualiza bancos existentes sem descartar dados."""
-    existing = {
-        row[1] for row in connection.execute("PRAGMA table_info(ensaios)").fetchall()
-    }
+    existing = {row[1] for row in connection.execute("PRAGMA table_info(ensaios)").fetchall()}
     for name, sql_type in TEST_COLUMNS.items():
         if name not in existing:
             connection.execute(f"ALTER TABLE ensaios ADD COLUMN {name} {sql_type}")
@@ -207,7 +219,15 @@ def apply_migrations(connection: sqlite3.Connection) -> None:
             connection.execute(f"ALTER TABLE medicoes ADD COLUMN {name} {sql_type}")
     connection.execute(
         """UPDATE medicoes SET vazao=COALESCE(vazao, vazao_baixa, vazao_alta),
-           unidade_vazao=COALESCE(unidade_vazao, 'L/min'), versao_schema=COALESCE(versao_schema, 0)
-           WHERE vazao IS NULL"""
+           unidade_vazao=COALESCE(unidade_vazao, 'L/min'),
+           vazao_valida=COALESCE(vazao_valida, CASE WHEN COALESCE(vazao, vazao_baixa, vazao_alta) IS NULL THEN 0 ELSE 1 END),
+           timestamp_vazao=COALESCE(timestamp_vazao, timestamp_computador),
+           status_vazao=COALESCE(status_vazao, CASE WHEN COALESCE(vazao, vazao_baixa, vazao_alta) IS NULL THEN 'LEGACY_MISSING' ELSE 'LEGACY_OK' END),
+           unidade_pressao=COALESCE(unidade_pressao, 'bar'),
+           pressao_valida=COALESCE(pressao_valida, CASE WHEN pressao IS NULL THEN 0 ELSE 1 END),
+           timestamp_pressao=COALESCE(timestamp_pressao, timestamp_computador),
+           status_pressao=COALESCE(status_pressao, CASE WHEN pressao IS NULL THEN 'LEGACY_MISSING' ELSE 'LEGACY_OK' END),
+           versao_schema=COALESCE(versao_schema, 0)
+           WHERE vazao IS NULL OR timestamp_vazao IS NULL OR timestamp_pressao IS NULL"""
     )
     connection.execute("UPDATE schema_version SET version=?", (SCHEMA_VERSION,))

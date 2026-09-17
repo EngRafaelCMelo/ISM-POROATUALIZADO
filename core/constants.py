@@ -7,6 +7,8 @@ class ReadingQuality(StrEnum):
     VALID = "válida"
     WARNING = "atenção"
     INVALID = "inválida"
+    STALE = "desatualizada"
+    DISCONNECTED = "desconectada"
     MISSING = "ausente"
     SIMULATED = "simulada"
 

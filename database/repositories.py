@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from datetime import datetime
-from typing import Any, Iterable
+from typing import Any
 
 from core.constants import TestStatus
 from core.models import Alarm, Measurement, TestDefinition, TestSession
@@ -45,18 +45,32 @@ class TestRepository:
                     , configuracao_json, versao_firmware, simulado
                 ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
-                    definition.code, sample_id, definition.sample_name,
-                    definition.sample_identification, definition.operator,
-                    definition.description, definition.test_type, definition.notes,
-                    definition.expected_pressure_range, "Único",
-                    definition.pressure_unit, definition.flow_unit,
-                    definition.acquisition_interval, definition.export_directory,
-                    now.isoformat(), TestStatus.RUNNING.value,
-                    definition.sample_length_mm, definition.sample_diameter_mm,
-                    definition.sample_mass_g, definition.bulk_volume_cm3,
-                    definition.gas_type, definition.temperature_c,
-                    definition.atmospheric_pressure_kpa, definition.pressure_reference,
-                    definition.configuration_snapshot, definition.firmware_version,
+                    definition.code,
+                    sample_id,
+                    definition.sample_name,
+                    definition.sample_identification,
+                    definition.operator,
+                    definition.description,
+                    definition.test_type,
+                    definition.notes,
+                    definition.expected_pressure_range,
+                    "Único",
+                    definition.pressure_unit,
+                    definition.flow_unit,
+                    definition.acquisition_interval,
+                    definition.export_directory,
+                    now.isoformat(),
+                    TestStatus.RUNNING.value,
+                    definition.sample_length_mm,
+                    definition.sample_diameter_mm,
+                    definition.sample_mass_g,
+                    definition.bulk_volume_cm3,
+                    definition.gas_type,
+                    definition.temperature_c,
+                    definition.atmospheric_pressure_kpa,
+                    definition.pressure_reference,
+                    definition.configuration_snapshot,
+                    definition.firmware_version,
                     int(definition.simulated),
                 ),
             )
@@ -64,15 +78,18 @@ class TestRepository:
         return TestSession(test_id, definition, TestStatus.RUNNING, now)
 
     def save_measurement(self, test_id: int, measurement: Measurement) -> int:
-        maximum_pressure = measurement.pressure.value if measurement.pressure.quality.value in ("valid", "warning", "simulated") else None
-        maximum_flow = measurement.flow.value if measurement.flow.quality.value in ("valid", "warning", "simulated") else None
+        maximum_pressure = measurement.pressure.value if measurement.pressure.valid else None
+        maximum_flow = measurement.flow.value if measurement.flow.valid else None
         with self.db.transaction() as con:
             cur = con.execute(
                 """INSERT INTO medicoes(
                     ensaio_id, timestamp_computador, timestamp_esp32, pressao_ma,
-                    pressao, vazao_baixa_ma, vazao_baixa, vazao_alta_ma, vazao_alta,
-                    flow_meter_ativo, qualidade, estado_comunicacao, mensagem_original
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    pressao, pressao_ads_raw, unidade_pressao, pressao_valida,
+                    timestamp_pressao, status_pressao, vazao_raw, vazao,
+                    unidade_vazao, vazao_valida, timestamp_vazao, status_vazao,
+                    sequencia, versao_schema, versao_firmware, simulado,
+                    qualidade, estado_comunicacao, mensagem_original
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 measurement.to_db_tuple(test_id),
             )
             con.execute(
@@ -87,8 +104,12 @@ class TestRepository:
                      ELSE vazao_maxima END
                    WHERE id = ?""",
                 (
-                    maximum_pressure, maximum_pressure, maximum_pressure,
-                    maximum_flow, maximum_flow, maximum_flow,
+                    maximum_pressure,
+                    maximum_pressure,
+                    maximum_pressure,
+                    maximum_flow,
+                    maximum_flow,
+                    maximum_flow,
                     test_id,
                 ),
             )
@@ -174,9 +195,15 @@ class EventRepository:
                     valor_medido,limite,reconhecido,observacao_operador
                 ) VALUES(?,?,?,?,?,?,?,?,?,?)""",
                 (
-                    test_id, alarm.timestamp.isoformat(), alarm.sensor,
-                    alarm.severity.value, alarm.category, alarm.message,
-                    alarm.measured_value, alarm.limit_value, int(alarm.acknowledged),
+                    test_id,
+                    alarm.timestamp.isoformat(),
+                    alarm.sensor,
+                    alarm.severity.value,
+                    alarm.category,
+                    alarm.message,
+                    alarm.measured_value,
+                    alarm.limit_value,
+                    int(alarm.acknowledged),
                     alarm.operator_note,
                 ),
             )
@@ -208,8 +235,15 @@ class CalibrationRepository:
         self.db = database
 
     def save(
-        self, sensor: str, operator: str, gain: float, offset: float, error: float,
-        stable: bool, points: list[tuple[float, float]], notes: str
+        self,
+        sensor: str,
+        operator: str,
+        gain: float,
+        offset: float,
+        error: float,
+        stable: bool,
+        points: list[tuple[float, float]],
+        notes: str,
     ) -> int:
         with self.db.transaction() as con:
             con.execute("UPDATE calibracoes SET ativa=0 WHERE sensor=?", (sensor,))
@@ -218,8 +252,15 @@ class CalibrationRepository:
                    sensor,timestamp,operador,ganho,offset,erro,estavel,pontos_json,
                    observacoes,ativa) VALUES(?,?,?,?,?,?,?,?,?,1)""",
                 (
-                    sensor, datetime.now().isoformat(), operator, gain, offset, error,
-                    int(stable), json.dumps(points), notes,
+                    sensor,
+                    datetime.now().isoformat(),
+                    operator,
+                    gain,
+                    offset,
+                    error,
+                    int(stable),
+                    json.dumps(points),
+                    notes,
                 ),
             )
             return int(cur.lastrowid)
@@ -229,6 +270,15 @@ class CalibrationRepository:
             return con.execute(
                 "SELECT * FROM calibracoes WHERE sensor=? ORDER BY timestamp DESC", (sensor,)
             ).fetchall()
+
+    def active_exists(self, sensor: str = "pressao") -> bool:
+        with self.db.read_connection() as con:
+            return (
+                con.execute(
+                    "SELECT 1 FROM calibracoes WHERE sensor=? AND ativa=1 LIMIT 1", (sensor,)
+                ).fetchone()
+                is not None
+            )
 
 
 class CalculationRepository:
@@ -249,9 +299,12 @@ class CalculationRepository:
                    ensaio_id,timestamp,tipo,entradas_json,resultados_json,observacoes
                    ) VALUES(?,?,?,?,?,?)""",
                 (
-                    test_id, datetime.now().isoformat(), calculation_type,
+                    test_id,
+                    datetime.now().isoformat(),
+                    calculation_type,
                     json.dumps(inputs, ensure_ascii=False),
-                    json.dumps(results, ensure_ascii=False), notes,
+                    json.dumps(results, ensure_ascii=False),
+                    notes,
                 ),
             )
             return int(cursor.lastrowid)

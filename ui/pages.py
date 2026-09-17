@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections import deque
 from datetime import datetime
-from pathlib import Path
 from statistics import mean
 from typing import Any
 
@@ -24,7 +23,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
-    QScrollArea,
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
@@ -36,11 +34,11 @@ from PySide6.QtWidgets import (
 
 from core.calculations import calculate_statistics
 from core.calibration import fit_calibration
-from core.constants import TestStatus
-from core.models import Alarm, Measurement, TestSession
-from ui.widgets.sensor_card import SensorCard
-from ui.theme import COLORS, icon_path
+from core.constants import ReadingQuality
+from core.models import Alarm, Measurement, SensorReading, TestSession
 from ui.resources import branding_path
+from ui.theme import COLORS, icon_path
+from ui.widgets.sensor_card import SensorCard
 
 
 def card_frame() -> tuple[QFrame, QVBoxLayout]:
@@ -84,8 +82,11 @@ class OverviewPage(QWidget):
         for key in ("pressao", "vazao"):
             cfg = sensor_config[key]
             card = SensorCard(
-                cfg["nome"], cfg["unidade"], float(cfg.get("limite_inferior") or 0),
-                float(cfg.get("limite_superior") or 100), int(cfg.get("casas", 2)),
+                cfg["nome"],
+                cfg["unidade"],
+                float(cfg.get("limite_inferior") or 0),
+                float(cfg.get("limite_superior") or 100),
+                int(cfg.get("casas", 2)),
             )
             cards.addWidget(card)
             self.cards[key] = card
@@ -100,7 +101,9 @@ class OverviewPage(QWidget):
         clear_plot.setObjectName("quiet")
         clear_plot.setToolTip("Limpa somente o gráfico; os dados do ensaio permanecem gravados")
         clear_plot.clicked.connect(self.clear_visualization)
-        plot_header.addWidget(title); plot_header.addStretch(); plot_header.addWidget(clear_plot)
+        plot_header.addWidget(title)
+        plot_header.addStretch()
+        plot_header.addWidget(clear_plot)
         plot_layout.addLayout(plot_header)
         self.compact_plot = pg.PlotWidget()
         self.compact_plot.setMinimumHeight(210)
@@ -108,8 +111,12 @@ class OverviewPage(QWidget):
         self.compact_plot.setBackground("w")
         self.compact_plot.setLabel("bottom", "Tempo", units="s")
         self.compact_plot.setLabel("left", "Pressão / vazão")
-        self.pressure_curve = self.compact_plot.plot(pen=pg.mkPen(COLORS["pressure"], width=2), name="Pressão")
-        self.flow_curve = self.compact_plot.plot(pen=pg.mkPen(COLORS["flow"], width=2), name="Vazão")
+        self.pressure_curve = self.compact_plot.plot(
+            pen=pg.mkPen(COLORS["pressure"], width=2), name="Pressão"
+        )
+        self.flow_curve = self.compact_plot.plot(
+            pen=pg.mkPen(COLORS["flow"], width=2), name="Vazão"
+        )
         self.compact_plot.addLegend(offset=(8, 8))
         plot_layout.addWidget(self.compact_plot)
         lower.addWidget(plot_card, 2)
@@ -126,12 +133,17 @@ class OverviewPage(QWidget):
         self.active_flow = QLabel("Flow meter único")
         self.valid_count = QLabel("0")
         self.invalid_count = QLabel("0")
-        for i, (label, value) in enumerate([
-            ("Duração", self.duration), ("Amostras", self.samples),
-            ("Taxa real", self.rate), ("Registro", self.recording),
-            ("Sensor de vazão", self.active_flow),
-            ("Leituras válidas", self.valid_count), ("Leituras inválidas", self.invalid_count),
-        ]):
+        for i, (label, value) in enumerate(
+            [
+                ("Duração", self.duration),
+                ("Amostras", self.samples),
+                ("Taxa real", self.rate),
+                ("Registro", self.recording),
+                ("Sensor de vazão", self.active_flow),
+                ("Leituras válidas", self.valid_count),
+                ("Leituras inválidas", self.invalid_count),
+            ]
+        ):
             name = QLabel(label)
             name.setObjectName("muted")
             row, group = divmod(i, 2)
@@ -150,15 +162,22 @@ class OverviewPage(QWidget):
         self.pause_button.setIcon(QIcon(icon_path("pause")))
         self.finish_button.setIcon(QIcon(icon_path("finish")))
         self.marker_button.setIcon(QIcon(icon_path("marker")))
-        for button in (self.start_button, self.pause_button, self.finish_button, self.marker_button):
+        for button in (
+            self.start_button,
+            self.pause_button,
+            self.finish_button,
+            self.marker_button,
+        ):
             button.setIconSize(QSize(17, 17))
         self.start_button.clicked.connect(self.start_requested)
         self.pause_button.clicked.connect(self.pause_requested)
         self.finish_button.clicked.connect(self.finish_requested)
         self.marker_button.clicked.connect(self.marker_requested)
         actions = QGridLayout()
-        actions.addWidget(self.start_button, 0, 0); actions.addWidget(self.pause_button, 0, 1)
-        actions.addWidget(self.marker_button, 1, 0); actions.addWidget(self.finish_button, 1, 1)
+        actions.addWidget(self.start_button, 0, 0)
+        actions.addWidget(self.pause_button, 0, 1)
+        actions.addWidget(self.marker_button, 1, 0)
+        actions.addWidget(self.finish_button, 1, 1)
         status_layout.addLayout(actions)
         self.set_test_active(False)
         lower.addWidget(status_card, 1)
@@ -185,28 +204,42 @@ class OverviewPage(QWidget):
         alarms_layout.addWidget(self.alarm_table)
         outer.addWidget(alarms_card)
 
-        self._times: deque[float] = deque(maxlen=60)
+        self._pressure_times: deque[float] = deque(maxlen=60)
+        self._flow_times: deque[float] = deque(maxlen=60)
         self._pressure: deque[float] = deque(maxlen=60)
         self._flow: deque[float] = deque(maxlen=60)
         self._first_time: datetime | None = None
+        self._report_ready = False
 
     def update_measurement(self, measurement: Measurement) -> None:
-        self.cards["pressao"].update_reading(measurement.pressure)
-        self.cards["vazao"].update_reading(
-            measurement.flow,
-            unavailable_message=("Sem comunicação com flowmeter"
-                                 if measurement.flowmeter_ok is False else None),
-        )
         self.simulation_banner.setVisible(measurement.simulated)
+        self.update_pressure(measurement.pressure)
+        self.update_flow(measurement.flow)
+
+    def update_pressure(self, reading: SensorReading) -> None:
+        self.cards["pressao"].update_reading(reading)
+        timestamp = reading.timestamp or datetime.now()
         if self._first_time is None:
-            self._first_time = measurement.received_at
-        t = (measurement.received_at - self._first_time).total_seconds()
-        self._times.append(t)
-        self._pressure.append(float("nan") if measurement.pressure.value is None else measurement.pressure.value)
-        self._flow.append(float("nan") if measurement.flow.value is None else measurement.flow.value)
-        x = list(self._times)
-        self.pressure_curve.setData(x, list(self._pressure))
-        self.flow_curve.setData(x, list(self._flow))
+            self._first_time = timestamp
+        self._pressure_times.append((timestamp - self._first_time).total_seconds())
+        self._pressure.append(float("nan") if reading.value is None else reading.value)
+        self.pressure_curve.setData(list(self._pressure_times), list(self._pressure))
+
+    def update_flow(self, reading: SensorReading) -> None:
+        self.cards["vazao"].update_reading(
+            reading,
+            unavailable_message="Sem comunicação com flowmeter"
+            if reading.quality == ReadingQuality.DISCONNECTED
+            else None,
+        )
+        timestamp = reading.timestamp
+        if timestamp is None:
+            return
+        if self._first_time is None:
+            self._first_time = timestamp
+        self._flow_times.append((timestamp - self._first_time).total_seconds())
+        self._flow.append(float("nan") if reading.value is None else reading.value)
+        self.flow_curve.setData(list(self._flow_times), list(self._flow))
 
     def set_test_active(self, active: bool, paused: bool = False) -> None:
         self.start_button.setEnabled(not active)
@@ -222,19 +255,33 @@ class OverviewPage(QWidget):
         for card in self.cards.values():
             card.reset_statistics()
         self.samples.setText("0")
+        self._report_ready = False
         self.set_test_active(False)
 
+    def set_report_ready(self, ready: bool) -> None:
+        self._report_ready = ready
+
     def clear_visualization(self) -> None:
-        self._times.clear(); self._pressure.clear(); self._flow.clear(); self._first_time = None
-        self.pressure_curve.clear(); self.flow_curve.clear()
+        self._pressure_times.clear()
+        self._flow_times.clear()
+        self._pressure.clear()
+        self._flow.clear()
+        self._first_time = None
+        self.pressure_curve.clear()
+        self.flow_curve.clear()
 
     def add_alarm(self, alarm_id: int, alarm: Alarm) -> None:
         row = self.alarm_table.rowCount()
         self.alarm_table.insertRow(row)
-        for col, text in enumerate([
-            str(alarm_id), alarm.timestamp.strftime("%H:%M:%S"), alarm.sensor,
-            alarm.severity.value, alarm.message,
-        ]):
+        for col, text in enumerate(
+            [
+                str(alarm_id),
+                alarm.timestamp.strftime("%H:%M:%S"),
+                alarm.sensor,
+                alarm.severity.value,
+                alarm.message,
+            ]
+        ):
             item = QTableWidgetItem(text)
             if alarm.severity.value in ("alarme", "crítico"):
                 item.setForeground(QColor(COLORS["error"]))
@@ -253,7 +300,9 @@ class GraphsPage(QWidget):
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
-        layout.addLayout(page_header("Gráficos", "Aquisição em tempo real; zoom e deslocamento disponíveis"))
+        layout.addLayout(
+            page_header("Gráficos", "Aquisição em tempo real; zoom e deslocamento disponíveis")
+        )
         toolbar = QHBoxLayout()
         self.window_combo = QComboBox()
         self.window_combo.addItems(["Últimos 60 s", "Últimos 5 min", "Todo o ensaio"])
@@ -273,8 +322,12 @@ class GraphsPage(QWidget):
         self.graphics.setBackground("w")
         layout.addWidget(self.graphics)
         titles = [
-            "Pressão × tempo", "Vazão × tempo", "Pressão e vazão",
-            "Corrente do transdutor", "Vazão × pressão", "Qualidade da aquisição",
+            "Pressão × tempo",
+            "Vazão × tempo",
+            "Pressão e vazão",
+            "Corrente do transdutor",
+            "Vazão × pressão",
+            "Qualidade da aquisição",
         ]
         self.plots: list[pg.PlotItem] = []
         for index, title in enumerate(titles):
@@ -284,9 +337,13 @@ class GraphsPage(QWidget):
             plot.setClipToView(True)
             self.plots.append(plot)
         self.curves = {
-            "pressure": self.plots[0].plot(pen=pg.mkPen(COLORS["pressure"], width=2), name="Pressão"),
+            "pressure": self.plots[0].plot(
+                pen=pg.mkPen(COLORS["pressure"], width=2), name="Pressão"
+            ),
             "flow": self.plots[1].plot(pen=pg.mkPen(COLORS["flow"], width=2), name="Vazão"),
-            "combined_p": self.plots[2].plot(pen=pg.mkPen(COLORS["pressure"], width=2), name="Pressão"),
+            "combined_p": self.plots[2].plot(
+                pen=pg.mkPen(COLORS["pressure"], width=2), name="Pressão"
+            ),
             "combined_f": self.plots[2].plot(pen=pg.mkPen(COLORS["flow"], width=2), name="Vazão"),
             "ma_p": self.plots[3].plot(pen=pg.mkPen(COLORS["pressure"]), name="Pressão"),
             "flow_pressure": self.plots[4].plot(
@@ -296,56 +353,91 @@ class GraphsPage(QWidget):
         self.cursor_v = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen(COLORS["inactive"]))
         self.plots[0].addItem(self.cursor_v, ignoreBounds=True)
         self.plots[0].scene().sigMouseMoved.connect(self._mouse_moved)
-        self.times: list[float] = []
+        self.pressure_times: list[float] = []
+        self.flow_times: list[float] = []
         self.pressure: list[float] = []
         self.flow: list[float] = []
         self.ma_p: list[float] = []
+        self.flow_pressure_x: list[float] = []
+        self.flow_pressure_y: list[float] = []
+        self._latest_pressure: float | None = None
         self._first: datetime | None = None
 
     def add_measurement(self, m: Measurement) -> None:
+        self.add_pressure(m.pressure)
+        self.add_flow(m.flow)
+
+    def add_pressure(self, reading: SensorReading) -> None:
+        timestamp = reading.timestamp or datetime.now()
         if self._first is None:
-            self._first = m.received_at
-        self.times.append((m.received_at - self._first).total_seconds())
+            self._first = timestamp
+        self.pressure_times.append((timestamp - self._first).total_seconds())
         nan = float("nan")
-        self.pressure.append(m.pressure.value if m.pressure.value is not None else nan)
-        self.flow.append(m.flow.value if m.flow.value is not None else nan)
-        self.ma_p.append(m.pressure.current_ma if m.pressure.current_ma is not None else nan)
-        if len(self.times) > 100_000:
-            for values in (
-                self.times, self.pressure, self.flow, self.ma_p,
-            ):
+        self.pressure.append(reading.value if reading.value is not None else nan)
+        self.ma_p.append(reading.current_ma if reading.current_ma is not None else nan)
+        self._latest_pressure = reading.value
+        if len(self.pressure_times) > 100_000:
+            for values in (self.pressure_times, self.pressure, self.ma_p):
                 del values[:10_000]
         if not self.visual_pause.isChecked():
             self.refresh()
 
+    def add_flow(self, reading: SensorReading) -> None:
+        if reading.timestamp is None:
+            return
+        if self._first is None:
+            self._first = reading.timestamp
+        self.flow_times.append((reading.timestamp - self._first).total_seconds())
+        self.flow.append(reading.value if reading.value is not None else float("nan"))
+        if reading.value is not None and self._latest_pressure is not None:
+            self.flow_pressure_x.append(self._latest_pressure)
+            self.flow_pressure_y.append(reading.value)
+        if len(self.flow_times) > 100_000:
+            del self.flow_times[:10_000]
+            del self.flow[:10_000]
+        if not self.visual_pause.isChecked():
+            self.refresh()
+
     def refresh(self) -> None:
-        if not self.times:
+        if not self.pressure_times and not self.flow_times:
             return
         window = [60, 300, None][self.window_combo.currentIndex()]
-        start = 0
-        if window is not None:
-            threshold = self.times[-1] - window
-            start = max(0, next((i for i, x in enumerate(self.times) if x >= threshold), 0))
-        step = max(1, (len(self.times) - start) // 3000)
-        sl = slice(start, None, step)
-        x = self.times[sl]
-        datasets = {
-            "pressure": self.pressure[sl], "flow": self.flow[sl],
-            "combined_p": self.pressure[sl], "combined_f": self.flow[sl],
-            "ma_p": self.ma_p[sl],
-        }
-        for name, values in datasets.items():
-            self.curves[name].setData(x, values)
-        self.curves["flow_pressure"].setData(self.pressure[sl], self.flow[sl])
+
+        def selected(times: list[float], values: list[float]) -> tuple[list[float], list[float]]:
+            start = 0
+            if window is not None and times:
+                threshold = times[-1] - window
+                start = next((i for i, x in enumerate(times) if x >= threshold), 0)
+            step = max(1, (len(times) - start) // 3000)
+            return times[start::step], values[start::step]
+
+        px, pressure = selected(self.pressure_times, self.pressure)
+        _, current = selected(self.pressure_times, self.ma_p)
+        fx, flow = selected(self.flow_times, self.flow)
+        self.curves["pressure"].setData(px, pressure)
+        self.curves["combined_p"].setData(px, pressure)
+        self.curves["ma_p"].setData(px, current)
+        self.curves["flow"].setData(fx, flow)
+        self.curves["combined_f"].setData(fx, flow)
+        self.curves["flow_pressure"].setData(
+            self.flow_pressure_x[-3000:], self.flow_pressure_y[-3000:]
+        )
         if self.auto_zoom.isChecked():
             for plot in self.plots:
                 plot.enableAutoRange()
 
     def reset(self) -> None:
         for values in (
-            self.times, self.pressure, self.flow, self.ma_p,
+            self.pressure_times,
+            self.flow_times,
+            self.pressure,
+            self.flow,
+            self.ma_p,
+            self.flow_pressure_x,
+            self.flow_pressure_y,
         ):
             values.clear()
+        self._latest_pressure = None
         self._first = None
         for curve in self.curves.values():
             curve.clear()
@@ -365,14 +457,22 @@ class TestPage(QWidget):
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
-        layout.addLayout(page_header("Ensaio", "Identificação, controle e estatísticas do ensaio atual"))
+        layout.addLayout(
+            page_header("Ensaio", "Identificação, controle e estatísticas do ensaio atual")
+        )
         info, info_layout = card_frame()
         grid = QGridLayout()
         self.labels: dict[str, QLabel] = {}
-        for index, (key, title) in enumerate([
-            ("code", "Código"), ("sample", "Amostra"), ("operator", "Operador"),
-            ("start", "Início"), ("status", "Status"), ("duration", "Duração"),
-        ]):
+        for index, (key, title) in enumerate(
+            [
+                ("code", "Código"),
+                ("sample", "Amostra"),
+                ("operator", "Operador"),
+                ("start", "Início"),
+                ("status", "Status"),
+                ("duration", "Duração"),
+            ]
+        ):
             name = QLabel(title)
             name.setObjectName("muted")
             value = QLabel("—")
@@ -383,8 +483,10 @@ class TestPage(QWidget):
         info_layout.addLayout(grid)
         controls = QHBoxLayout()
         for text, signal, primary in [
-            ("Novo ensaio", self.start_requested, True), ("Pausar/retomar", self.pause_requested, False),
-            ("Adicionar marcação", self.marker_requested, False), ("Finalizar", self.finish_requested, False),
+            ("Novo ensaio", self.start_requested, True),
+            ("Pausar/retomar", self.pause_requested, False),
+            ("Adicionar marcação", self.marker_requested, False),
+            ("Finalizar", self.finish_requested, False),
         ]:
             button = QPushButton(text)
             if primary:
@@ -401,16 +503,24 @@ class TestPage(QWidget):
         stats_layout.addWidget(heading)
         self.stats_table = QTableWidget(2, 9)
         self.stats_table.setHorizontalHeaderLabels(
-            ["Variável", "Atual", "Média", "Mediana", "Mín.", "Máx.", "Amplitude", "Desvio", "Válidas"]
+            [
+                "Variável",
+                "Atual",
+                "Média",
+                "Mediana",
+                "Mín.",
+                "Máx.",
+                "Amplitude",
+                "Desvio",
+                "Válidas",
+            ]
         )
         self.stats_table.setVerticalHeaderLabels(["", ""])
         self.stats_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         stats_layout.addWidget(self.stats_table)
         layout.addWidget(stats_card)
         layout.addStretch()
-        self.values: dict[str, list[float]] = {
-            "Pressão": [], "Vazão": []
-        }
+        self.values: dict[str, list[float]] = {"Pressão": [], "Vazão": []}
 
     def set_session(self, session: TestSession | None) -> None:
         if not session:
@@ -424,9 +534,7 @@ class TestPage(QWidget):
         self.labels["status"].setText(session.status.value.replace("_", " ").capitalize())
 
     def add_measurement(self, m: Measurement) -> None:
-        for key, reading in [
-            ("Pressão", m.pressure), ("Vazão", m.flow)
-        ]:
+        for key, reading in [("Pressão", m.pressure), ("Vazão", m.flow)]:
             if reading.value is not None and reading.quality.value not in ("inválida", "ausente"):
                 self.values[key].append(reading.value)
         self._refresh_stats()
@@ -435,12 +543,23 @@ class TestPage(QWidget):
         for row, (name, values) in enumerate(self.values.items()):
             stats = calculate_statistics(values)
             entries = [
-                name, stats.current, stats.average, stats.median, stats.minimum,
-                stats.maximum, stats.amplitude, stats.standard_deviation, stats.valid_count,
+                name,
+                stats.current,
+                stats.average,
+                stats.median,
+                stats.minimum,
+                stats.maximum,
+                stats.amplitude,
+                stats.standard_deviation,
+                stats.valid_count,
             ]
             for col, value in enumerate(entries):
-                text = value if isinstance(value, str) else str(value) if isinstance(value, int) else (
-                    f"{value:.3f}" if value is not None else "—"
+                text = (
+                    value
+                    if isinstance(value, str)
+                    else str(value)
+                    if isinstance(value, int)
+                    else (f"{value:.3f}" if value is not None else "—")
                 )
                 self.stats_table.setItem(row, col, QTableWidgetItem(text))
 
@@ -482,10 +601,21 @@ class HistoryPage(QWidget):
         toolbar.addWidget(self.date_to)
         layout.addLayout(toolbar)
         self.table = QTableWidget(0, 11)
-        self.table.setHorizontalHeaderLabels([
-            "ID", "Código", "Amostra", "Operador", "Data", "Duração", "Amostras",
-            "P. máxima", "V. máxima", "Status", "Observações",
-        ])
+        self.table.setHorizontalHeaderLabels(
+            [
+                "ID",
+                "Código",
+                "Amostra",
+                "Operador",
+                "Data",
+                "Duração",
+                "Amostras",
+                "P. máxima",
+                "V. máxima",
+                "Status",
+                "Observações",
+            ]
+        )
         self.table.setColumnHidden(0, True)
         self.table.setSortingEnabled(True)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -496,7 +626,8 @@ class HistoryPage(QWidget):
         self.table.doubleClicked.connect(lambda: self._emit_selected(self.open_requested))
         layout.addWidget(self.table)
         self.empty_label = QLabel("◇  Nenhum ensaio encontrado para os filtros selecionados")
-        self.empty_label.setObjectName("muted"); self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_label.setObjectName("muted")
+        self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.empty_label)
         actions = QHBoxLayout()
         for text, callback in [
@@ -520,21 +651,32 @@ class HistoryPage(QWidget):
         self.table.setRowCount(0)
         for row_data in rows:
             started = datetime.fromisoformat(row_data["inicio"]).date()
-            if started < self.date_from.date().toPython() or started > self.date_to.date().toPython():
+            if (
+                started < self.date_from.date().toPython()
+                or started > self.date_to.date().toPython()
+            ):
                 continue
             row = self.table.rowCount()
             self.table.insertRow(row)
             values = [
-                row_data["id"], row_data["codigo"], row_data["amostra_nome"], row_data["operador"],
+                row_data["id"],
+                row_data["codigo"],
+                row_data["amostra_nome"],
+                row_data["operador"],
                 datetime.fromisoformat(row_data["inicio"]).strftime("%d/%m/%Y %H:%M"),
-                f"{row_data['duracao_segundos'] or 0:.0f} s", row_data["quantidade_amostras"],
-                row_data["pressao_maxima"], row_data["vazao_maxima"], row_data["status"],
+                f"{row_data['duracao_segundos'] or 0:.0f} s",
+                row_data["quantidade_amostras"],
+                row_data["pressao_maxima"],
+                row_data["vazao_maxima"],
+                row_data["status"],
                 row_data["observacao_final"] or row_data["observacoes"] or "",
             ]
             for col, value in enumerate(values):
                 item = QTableWidgetItem("—" if value is None else str(value))
                 if col in (5, 6, 7, 8):
-                    item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                    item.setTextAlignment(
+                        Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                    )
                 self.table.setItem(row, col, item)
         self.table.setSortingEnabled(True)
         self.empty_label.setVisible(self.table.rowCount() == 0)
@@ -561,8 +703,11 @@ class CalibrationPage(QWidget):
         super().__init__()
         layout = QVBoxLayout(self)
         layout.addLayout(page_header("Calibração", "Ajuste por dois ou múltiplos pontos"))
-        workflow = QLabel("1  Selecionar sensor   ›   2  Capturar pontos   ›   3  Calcular   ›   4  Validar   ›   5  Salvar versão")
-        workflow.setObjectName("warningBanner"); layout.addWidget(workflow)
+        workflow = QLabel(
+            "1  Selecionar sensor   ›   2  Capturar pontos   ›   3  Calcular   ›   4  Validar   ›   5  Salvar versão"
+        )
+        workflow.setObjectName("warningBanner")
+        layout.addWidget(workflow)
         content = QHBoxLayout()
         setup, setup_layout = card_frame()
         form = QFormLayout()
@@ -624,7 +769,9 @@ class CalibrationPage(QWidget):
         title.setObjectName("sectionTitle")
         history_layout.addWidget(title)
         self.history = QTableWidget(0, 7)
-        self.history.setHorizontalHeaderLabels(["Versão", "Data", "Responsável", "Ganho", "Offset", "Erro", "Ativa"])
+        self.history.setHorizontalHeaderLabels(
+            ["Versão", "Data", "Responsável", "Ganho", "Offset", "Erro", "Ativa"]
+        )
         self.history.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         history_layout.addWidget(self.history)
         content.addWidget(history, 1)
@@ -647,9 +794,7 @@ class CalibrationPage(QWidget):
         samples = list(self.sample_windows[self.sensor.currentData()])
         if samples:
             average = mean(samples)
-            deviation = (
-                sum((value - average) ** 2 for value in samples) / len(samples)
-            ) ** 0.5
+            deviation = (sum((value - average) ** 2 for value in samples) / len(samples)) ** 0.5
             self.capture_stats.setText(
                 f"n={len(samples)} · média {average:.4f} · σ {deviation:.4f} · "
                 f"mín {min(samples):.4f} · máx {max(samples):.4f} mA"
@@ -682,7 +827,9 @@ class CalibrationPage(QWidget):
             self.gain.setText(f"{self.result.gain:.8f}")
             self.offset.setText(f"{self.result.offset:.8f}")
             self.error.setText(f"{self.result.error_rmse:.6f}")
-            self.stability.setText("Estável" if self.result.stable else "Instável — confirme antes de salvar")
+            self.stability.setText(
+                "Estável" if self.result.stable else "Instável — confirme antes de salvar"
+            )
             self.stability.setObjectName("pillGood" if self.result.stable else "pillWarn")
             self.stability.style().unpolish(self.stability)
             self.stability.style().polish(self.stability)
@@ -694,8 +841,12 @@ class CalibrationPage(QWidget):
     def _save(self) -> None:
         if self.result:
             self.save_requested.emit(
-                self.sensor.currentData(), self.result.gain, self.result.offset,
-                self.result.error_rmse, self.result.stable, self._point_values(),
+                self.sensor.currentData(),
+                self.result.gain,
+                self.result.offset,
+                self.result.error_rmse,
+                self.result.stable,
+                self._point_values(),
                 self.notes.toPlainText().strip(),
             )
 
@@ -704,12 +855,17 @@ class CalibrationPage(QWidget):
         for item in rows:
             row = self.history.rowCount()
             self.history.insertRow(row)
-            for col, value in enumerate([
-                f"CAL-{item['id']:04d}",
-                datetime.fromisoformat(item["timestamp"]).strftime("%d/%m/%Y %H:%M"),
-                item["operador"], item["ganho"], item["offset"], item["erro"],
-                "Sim" if item["ativa"] else "Não",
-            ]):
+            for col, value in enumerate(
+                [
+                    f"CAL-{item['id']:04d}",
+                    datetime.fromisoformat(item["timestamp"]).strftime("%d/%m/%Y %H:%M"),
+                    item["operador"],
+                    item["ganho"],
+                    item["offset"],
+                    item["erro"],
+                    "Sim" if item["ativa"] else "Não",
+                ]
+            ):
                 self.history.setItem(row, col, QTableWidgetItem(str(value)))
 
 
@@ -744,8 +900,11 @@ class SettingsPage(QWidget):
 
         sensors = QWidget()
         sensor_layout = QVBoxLayout(sensors)
-        sensor_help = QLabel("Faixas ausentes são configuração incompleta e impedem o início de ensaio real.")
-        sensor_help.setObjectName("warningBanner"); sensor_help.setWordWrap(True)
+        sensor_help = QLabel(
+            "A faixa de pressão é validada. Para a vazão Modbus, mínimo e máximo são apenas referências visuais e não bloqueiam o ensaio."
+        )
+        sensor_help.setObjectName("warningBanner")
+        sensor_help.setWordWrap(True)
         sensor_layout.addWidget(sensor_help)
         self.sensor_table = QTableWidget(2, 5)
         self.sensor_table.setHorizontalHeaderLabels(
@@ -755,7 +914,9 @@ class SettingsPage(QWidget):
         for row, key in enumerate(("pressao", "vazao")):
             cfg = config["sensores"][key]
             values = [
-                key, cfg["nome"], cfg["unidade"],
+                key,
+                cfg["nome"],
+                cfg["unidade"],
                 "" if cfg.get("limite_inferior") is None else cfg["limite_inferior"],
                 "" if cfg.get("limite_superior") is None else cfg["limite_superior"],
             ]
@@ -764,36 +925,74 @@ class SettingsPage(QWidget):
         sensor_layout.addWidget(self.sensor_table)
         tabs.addTab(sensors, "Transdutor")
 
-        modbus = QWidget(); modbus_form = QFormLayout(modbus)
-        modbus_notice = QLabel("Preencha somente com dados confirmados no manual do flow meter. Campos vazios mantêm o modo real bloqueado.")
-        modbus_notice.setObjectName("warningBanner"); modbus_notice.setWordWrap(True); modbus_form.addRow(modbus_notice)
+        modbus = QWidget()
+        modbus_form = QFormLayout(modbus)
+        modbus_notice = QLabel(
+            "Preencha somente com dados confirmados no manual do flow meter. Campos vazios mantêm o modo real bloqueado."
+        )
+        modbus_notice.setObjectName("warningBanner")
+        modbus_notice.setWordWrap(True)
+        modbus_form.addRow(modbus_notice)
         flow_cfg = config["flowmeter"]
         self.modbus_configured = QCheckBox("Parâmetros conferidos no manual")
-        self.modbus_configured.setChecked(bool(flow_cfg.get("configurado"))); modbus_form.addRow("Estado", self.modbus_configured)
+        self.modbus_configured.setChecked(bool(flow_cfg.get("configurado")))
+        modbus_form.addRow("Estado", self.modbus_configured)
         self.modbus_fields: dict[str, QLineEdit] = {}
         for key, label in [
-            ("porta", "Porta USB–RS485"), ("slave_id", "Endereço do escravo"), ("baud_rate", "Baud rate RS-485"),
+            ("porta", "Porta USB–RS485"),
+            ("slave_id", "Endereço do escravo"),
+            ("baud_rate", "Baud rate RS-485"),
             ("funcao", "Função Modbus"),
-            ("registrador_inicial", "Registrador inicial"), ("quantidade_registradores", "Quantidade de registradores"),
-            ("tipo_dado", "Tipo do dado"), ("ordem_bytes", "Ordem de bytes"),
+            ("registrador_inicial", "Registrador inicial"),
+            ("quantidade_registradores", "Quantidade de registradores"),
+            ("tipo_dado", "Tipo do dado"),
+            ("ordem_bytes", "Ordem de bytes"),
             ("fator_escala", "Fator de escala"),
         ]:
             field = QLineEdit("" if flow_cfg.get(key) is None else str(flow_cfg[key]))
-            field.setPlaceholderText("Obrigatório · consultar manual"); field.setProperty("required", True)
-            self.modbus_fields[key] = field; modbus_form.addRow(label, field)
+            field.setPlaceholderText("Obrigatório · consultar manual")
+            field.setProperty("required", True)
+            if key != "porta":
+                field.setReadOnly(True)
+                field.setToolTip(
+                    "Parâmetro fixo do flowmeter validado; comunicação somente leitura"
+                )
+            self.modbus_fields[key] = field
+            modbus_form.addRow(label, field)
+        self.modbus_timeout = QDoubleSpinBox()
+        self.modbus_timeout.setRange(0.75, 1.5)
+        self.modbus_timeout.setSingleStep(0.05)
+        self.modbus_timeout.setValue(float(flow_cfg.get("timeout_s", 1.0)))
+        self.modbus_interval = QSpinBox()
+        self.modbus_interval.setRange(125, 60000)
+        self.modbus_interval.setValue(int(flow_cfg.get("intervalo_ms", 1000)))
+        self.modbus_log_frames = QCheckBox("Habilitar no diagnóstico")
+        self.modbus_log_frames.setChecked(bool(flow_cfg.get("log_frames", False)))
+        modbus_form.addRow("Timeout (s)", self.modbus_timeout)
+        modbus_form.addRow("Intervalo de leitura (ms)", self.modbus_interval)
+        modbus_form.addRow("Log de frames TX/RX", self.modbus_log_frames)
         tabs.addTab(modbus, "Modbus")
 
-        ads = QWidget(); ads_form = QFormLayout(ads); pressure_cfg = config["sensores"]["pressao"]
+        ads = QWidget()
+        ads_form = QFormLayout(ads)
+        pressure_cfg = config["sensores"]["pressao"]
         ads_form.addRow("Interface I²C", QLabel("SDA GPIO21 · SCL GPIO22"))
-        ads_form.addRow("Endereço ADS1115", QLabel(str(pressure_cfg.get("ads1115_endereco", "0x48"))))
-        ads_form.addRow("Canal", QLabel(f"A{pressure_cfg.get('ads1115_canal', 0)} · single-ended para GND"))
+        ads_form.addRow(
+            "Endereço ADS1115", QLabel(str(pressure_cfg.get("ads1115_endereco", "0x48")))
+        )
+        ads_form.addRow(
+            "Canal", QLabel(f"A{pressure_cfg.get('ads1115_canal', 0)} · single-ended para GND")
+        )
         ads_form.addRow("Faixa do ADC", QLabel(f"±{pressure_cfg.get('ads1115_faixa_v', 4.096)} V"))
         ads_form.addRow("Resistor shunt", QLabel(f"{pressure_cfg.get('shunt_ohm', 149.7)} Ω"))
         ads_notice = QLabel("⚠ 24 V nunca deve ser aplicado ao ESP32 ou ADS1115.")
-        ads_notice.setObjectName("warningBanner"); ads_form.addRow(ads_notice)
+        ads_notice.setObjectName("warningBanner")
+        ads_form.addRow(ads_notice)
         tabs.addTab(ads, "ADS1115")
 
-        calculation_notice = QLabel("A permeabilidade é calculada a partir da geometria da amostra, pressão, vazão, gás e viscosidade. Configure a pressão de saída na tela de cálculo.")
+        calculation_notice = QLabel(
+            "A permeabilidade é calculada a partir da geometria da amostra, pressão, vazão, gás e viscosidade. Configure a pressão de saída na tela de cálculo."
+        )
         calculation_notice.setWordWrap(True)
         tabs.addTab(calculation_notice, "Permeabilidade")
 
@@ -829,25 +1028,50 @@ class SettingsPage(QWidget):
                 "limite_superior": float(upper) if upper else None,
             }
         flow: dict[str, Any] = {"configurado": self.modbus_configured.isChecked()}
-        integer_keys = {"slave_id", "baud_rate", "funcao", "registrador_inicial", "quantidade_registradores", "intervalo_ms"}
+        integer_keys = {
+            "slave_id",
+            "baud_rate",
+            "funcao",
+            "registrador_inicial",
+            "quantidade_registradores",
+            "intervalo_ms",
+        }
         for key, field in self.modbus_fields.items():
             text = field.text().strip()
-            flow[key] = int(text) if text and key in integer_keys else float(text) if text and key == "fator_escala" else text or None
-        self.save_requested.emit({
-            "comunicacao": {
-                "porta": self.port.text().strip(), "baud_rate": int(self.baud.currentText()),
-                "timeout_s": self.timeout.value(),
-                "reconexao_automatica": self.auto_reconnect.isChecked(),
-            },
-            "sensores": sensors,
-            "flowmeter": flow,
-            "dados": {
-                "diretorio_exportacao": self.export_path.text().strip(),
-                "separador_csv": self.separator.currentText(),
-                "backup_automatico": self.backup.isChecked(),
-            },
-            "calculos": self.config.get("calculos", {}),
-        })
+            flow[key] = (
+                int(text)
+                if text and key in integer_keys
+                else float(text)
+                if text and key == "fator_escala"
+                else text or None
+            )
+        flow.update(
+            {
+                "timeout_s": self.modbus_timeout.value(),
+                "intervalo_ms": self.modbus_interval.value(),
+                "stale_after_s": max(3.0, self.modbus_interval.value() * 3 / 1000.0),
+                "reconexao_automatica": True,
+                "log_frames": self.modbus_log_frames.isChecked(),
+            }
+        )
+        self.save_requested.emit(
+            {
+                "comunicacao": {
+                    "porta": self.port.text().strip(),
+                    "baud_rate": int(self.baud.currentText()),
+                    "timeout_s": self.timeout.value(),
+                    "reconexao_automatica": self.auto_reconnect.isChecked(),
+                },
+                "sensores": sensors,
+                "flowmeter": flow,
+                "dados": {
+                    "diretorio_exportacao": self.export_path.text().strip(),
+                    "separador_csv": self.separator.currentText(),
+                    "backup_automatico": self.backup.isChecked(),
+                },
+                "calculos": self.config.get("calculos", {}),
+            }
+        )
 
 
 class DiagnosticsPage(QWidget):
@@ -861,18 +1085,30 @@ class DiagnosticsPage(QWidget):
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
-        layout.addLayout(page_header("Diagnóstico", "Informações técnicas da aquisição e armazenamento"))
+        layout.addLayout(
+            page_header("Diagnóstico", "Informações técnicas da aquisição e armazenamento")
+        )
         info, info_layout = card_frame()
         grid = QGridLayout()
         self.values: dict[str, QLabel] = {}
         fields = [
-            ("port", "Porta serial"), ("baud", "Baud rate"), ("connection", "Conexão"),
-            ("last_age", "Última mensagem"), ("frequency", "Frequência real"),
-            ("valid", "Mensagens válidas"), ("invalid", "Mensagens inválidas"),
-            ("database", "Banco de dados"), ("db_path", "Caminho do banco"),
-            ("disk", "Espaço em disco"), ("version", "Versão"), ("mode", "Modo"),
-            ("ma_pressure", "Pressão (mA)"), ("flow_health", "Saúde do flow meter"), ("flow_state", "Estado Modbus"),
+            ("port", "Porta serial"),
+            ("baud", "Baud rate"),
+            ("connection", "Conexão"),
+            ("last_age", "Última mensagem"),
+            ("frequency", "Frequência real"),
+            ("valid", "Mensagens válidas"),
+            ("invalid", "Mensagens inválidas"),
+            ("database", "Banco de dados"),
+            ("db_path", "Caminho do banco"),
+            ("disk", "Espaço em disco"),
+            ("version", "Versão"),
+            ("mode", "Modo"),
+            ("ma_pressure", "Pressão (mA)"),
+            ("flow_health", "Saúde do flow meter"),
+            ("flow_state", "Estado Modbus"),
             ("reading_age", "Idade da leitura"),
+            ("modbus_stats", "Estatísticas Modbus"),
         ]
         for index, (key, title) in enumerate(fields):
             row, col = divmod(index, 3)
@@ -894,11 +1130,24 @@ class DiagnosticsPage(QWidget):
         raw_layout.addWidget(raw_title)
         raw_layout.addWidget(self.raw)
         layout.addWidget(raw_card)
+        frames_card, frames_layout = card_frame()
+        frames_title = QLabel("Frames Modbus TX/RX (quando habilitados)")
+        frames_title.setObjectName("sectionTitle")
+        self.frames = QPlainTextEdit()
+        self.frames.setReadOnly(True)
+        self.frames.setMaximumHeight(105)
+        self.frames.document().setMaximumBlockCount(200)
+        frames_layout.addWidget(frames_title)
+        frames_layout.addWidget(self.frames)
+        layout.addWidget(frames_card)
         buttons = QHBoxLayout()
         for text, signal in [
-            ("Copiar diagnóstico", self.copy_requested), ("Limpar contadores", self.reset_requested),
-            ("Testar banco", self.db_test_requested), ("Testar exportação", self.export_test_requested),
-            ("Abrir logs", self.open_logs_requested), ("Reiniciar conexão", self.restart_requested),
+            ("Copiar diagnóstico", self.copy_requested),
+            ("Limpar contadores", self.reset_requested),
+            ("Testar banco", self.db_test_requested),
+            ("Testar exportação", self.export_test_requested),
+            ("Abrir logs", self.open_logs_requested),
+            ("Reiniciar conexão", self.restart_requested),
         ]:
             button = QPushButton(text)
             button.clicked.connect(signal)
@@ -910,6 +1159,7 @@ class DiagnosticsPage(QWidget):
     def report_text(self) -> str:
         lines = [f"{key}: {label.text()}" for key, label in self.values.items()]
         lines.append(f"Mensagem: {self.raw.toPlainText()}")
+        lines.append(f"Frames Modbus:\n{self.frames.toPlainText()}")
         return "\n".join(lines)
 
 
@@ -917,19 +1167,26 @@ class AboutPage(QWidget):
     def __init__(self, version: str):
         super().__init__()
         layout = QVBoxLayout(self)
-        layout.addLayout(page_header("Sobre", "Identificação, arquitetura e informações de suporte"))
+        layout.addLayout(
+            page_header("Sobre", "Identificação, arquitetura e informações de suporte")
+        )
         card, card_layout = card_frame()
         logo = QLabel()
-        logo.setPixmap(QPixmap(str(branding_path("ism_logo_horizontal.png"))).scaled(
-            560, 190, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
-        ))
+        logo.setPixmap(
+            QPixmap(str(branding_path("ism_logo_horizontal.png"))).scaled(
+                560,
+                190,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
         logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         logo.setMinimumHeight(170)
         title = QLabel("Supervisório ISM – Permeabilímetro")
         title.setObjectName("pageTitle")
         description = QLabel(
             "Sistema industrial de aquisição e análise para um transdutor de pressão 4–20 mA "
-            "e um flow meter Modbus RTU, conectado ao computador por ESP32/USB serial."
+            "lido pelo ESP32 e um flowmeter Modbus RTU ligado diretamente ao computador por USB–RS485."
         )
         description.setWordWrap(True)
         description.setObjectName("muted")
@@ -938,7 +1195,9 @@ class AboutPage(QWidget):
         details.addRow("Protocolo serial", QLabel("JSON Lines · schema 1"))
         details.addRow("Banco de dados", QLabel("SQLite · modo WAL"))
         details.addRow("Interface", QLabel("PySide6 / Qt"))
-        notice = QLabel("◇ Consulte o README antes de conectar alimentação de 24 V ou alterar parâmetros Modbus.")
+        notice = QLabel(
+            "◇ Consulte o README antes de conectar alimentação de 24 V ou alterar parâmetros Modbus."
+        )
         notice.setObjectName("warningBanner")
         notice.setWordWrap(True)
         card_layout.addWidget(logo)

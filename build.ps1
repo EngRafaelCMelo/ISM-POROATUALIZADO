@@ -7,7 +7,8 @@ if (Test-Path -LiteralPath ".venv\Scripts\python.exe") {
     $BuildPython = (Get-Command python -ErrorAction Stop).Source
 }
 
-& $BuildPython -m pip install -r requirements.txt
+& $BuildPython -m pip install -r requirements-dev.txt
 & $BuildPython -m PyInstaller --noconfirm PermeabilimetroSupervisorio.spec
 
-Write-Host "Executavel criado em dist\PermeabilimetroSupervisorio_v2_1_0\PermeabilimetroSupervisorio_v2_1_0.exe"
+$BuildVersion = & $BuildPython -c "from core.version import APP_VERSION; print(APP_VERSION.replace('.', '_'))"
+Write-Host "Executavel criado em dist\PermeabilimetroSupervisorio_v$BuildVersion\PermeabilimetroSupervisorio_v$BuildVersion.exe"

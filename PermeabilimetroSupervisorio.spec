@@ -1,8 +1,10 @@
 # -*- mode: python ; coding: utf-8 -*-
 from pathlib import Path
+import runpy
 
 root = Path(SPECPATH)
-app_name = "PermeabilimetroSupervisorio_v2_1_0"
+version = runpy.run_path(str(root / "core" / "version.py"))["APP_VERSION"]
+app_name = f"PermeabilimetroSupervisorio_v{version.replace('.', '_')}"
 
 a = Analysis(
     [str(root / "app.py")],

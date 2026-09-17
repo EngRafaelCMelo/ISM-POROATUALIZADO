@@ -4,8 +4,10 @@ Sketch independente para verificar a comunicacao I2C e as quatro entradas
 analogicas do ADS1115.
 
 Este sketch é somente um diagnóstico de bancada e não envia o protocolo do
-supervisório. Para operar o equipamento com o MAX3485 e um único flow meter,
-use `../firmware_esp32_permeabilimetro/firmware_esp32_permeabilimetro.ino`.
+supervisório. Para operar o equipamento, use
+`../firmware_esp32_permeabilimetro/firmware_esp32_permeabilimetro.ino`; o
+flowmeter deve permanecer conectado diretamente ao computador pelo adaptador
+USB–RS485, em uma segunda porta COM.
 
 ## Ligacoes
 

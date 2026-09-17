@@ -1,16 +1,17 @@
 """Ponto de entrada do Supervisório ISM – Permeabilímetro."""
+
 from __future__ import annotations
 
+import ctypes
 import logging
 import sys
-import ctypes
-from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import QApplication, QMessageBox, QSplashScreen
 
 from config.settings import AppPaths, ConfigManager
+from core.version import APP_NAME, APP_VERSION
 from database.database import Database
 from ui.main_window import MainWindow
 from ui.resources import branding_path
@@ -36,12 +37,14 @@ def main() -> int:
     paths = AppPaths.create()
     configure_logging(paths)
     app = QApplication(sys.argv)
-    app.setApplicationName("Supervisório ISM – Permeabilímetro")
+    app.setApplicationName(APP_NAME)
     app.setOrganizationName("ISM")
     app.setAttribute(Qt.ApplicationAttribute.AA_DontUseNativeMenuBar)
     if sys.platform == "win32":
         try:
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("ISM.Permeabilimetro.Supervisor.2.1")
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                f"ISM.Permeabilimetro.Supervisor.{APP_VERSION}"
+            )
         except (AttributeError, OSError):
             logging.warning("Não foi possível definir AppUserModelID")
     app_icon = QIcon(str(branding_path("ism_app_icon.ico")))
@@ -52,11 +55,12 @@ def main() -> int:
     splash = QSplashScreen(splash_pixmap)
     splash.setWindowIcon(app_icon)
     splash.showMessage(
-        "Supervisório ISM – Permeabilímetro · inicializando…",
+        f"{APP_NAME} · inicializando…",
         Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignHCenter,
         Qt.GlobalColor.darkBlue,
     )
-    splash.show(); app.processEvents()
+    splash.show()
+    app.processEvents()
 
     try:
         config = ConfigManager(paths)
@@ -74,6 +78,10 @@ def main() -> int:
         window.setWindowIcon(app_icon)
         window.show()
         splash.finish(window)
+        if config.warnings:
+            QMessageBox.warning(
+                window, "Configuração local recuperada", "\n\n".join(config.warnings)
+            )
         return app.exec()
     except Exception as exc:  # proteção da borda da aplicação
         logging.exception("Falha fatal ao iniciar a aplicação")

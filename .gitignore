@@ -3,7 +3,9 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 build/
+build_*/
 dist/
+.pio/
 
 data/*.db
 data/*.db-*

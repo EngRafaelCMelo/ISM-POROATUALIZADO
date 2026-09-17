@@ -15,12 +15,22 @@ class SensorReading:
     device_value: float | None = None
     calculated_value: float | None = None
     device_status: str = ""
+    raw_value: int | float | None = None
+    unit: str = ""
+    timestamp: datetime | None = None
 
     @property
     def valid(self) -> bool:
         return self.value is not None and self.quality in (
-            ReadingQuality.VALID, ReadingQuality.WARNING, ReadingQuality.SIMULATED,
+            ReadingQuality.VALID,
+            ReadingQuality.WARNING,
+            ReadingQuality.SIMULATED,
         )
+
+    def age_seconds(self, now: datetime | None = None) -> float | None:
+        if self.timestamp is None:
+            return None
+        return max(0.0, ((now or datetime.now()) - self.timestamp).total_seconds())
 
 
 @dataclass(slots=True)
@@ -34,6 +44,9 @@ class Measurement:
     raw_message: str = ""
     simulated: bool = False
     recordable: bool = True
+    sequence: int | None = None
+    schema_version: int | None = None
+    firmware_version: str = ""
 
     def to_db_tuple(self, test_id: int) -> tuple[Any, ...]:
         qualities = {
@@ -41,7 +54,11 @@ class Measurement:
             self.flow.quality.value,
         }
         overall = (
-            ReadingQuality.INVALID.value
+            ReadingQuality.DISCONNECTED.value
+            if ReadingQuality.DISCONNECTED.value in qualities
+            else ReadingQuality.STALE.value
+            if ReadingQuality.STALE.value in qualities
+            else ReadingQuality.INVALID.value
             if ReadingQuality.INVALID.value in qualities
             else ReadingQuality.WARNING.value
             if ReadingQuality.WARNING.value in qualities
@@ -57,11 +74,23 @@ class Measurement:
             self.device_timestamp_ms,
             self.pressure.current_ma,
             self.pressure.value,
-            self.flow.current_ma,
+            self.pressure.raw_value,
+            self.pressure.unit,
+            int(self.pressure.valid),
+            self.pressure.timestamp.isoformat(timespec="milliseconds")
+            if self.pressure.timestamp
+            else None,
+            self.pressure.device_status,
+            self.flow.raw_value,
             self.flow.value,
-            None,  # coluna legada vazao_alta_ma
-            None,  # coluna legada vazao_alta
-            "unica",  # coluna legada flow_meter_ativo
+            self.flow.unit,
+            int(self.flow.valid),
+            self.flow.timestamp.isoformat(timespec="milliseconds") if self.flow.timestamp else None,
+            self.flow.device_status,
+            self.sequence,
+            self.schema_version,
+            self.firmware_version,
+            int(self.simulated),
             overall,
             self.communication_state,
             self.raw_message,
@@ -78,8 +107,8 @@ class TestDefinition:
     test_type: str = "Permeabilidade"
     notes: str = ""
     expected_pressure_range: str = ""
-    pressure_unit: str = "bar"
-    flow_unit: str = "L/min"
+    pressure_unit: str = "psi"
+    flow_unit: str = "NL/min"
     acquisition_interval: float = 1.0
     export_directory: str = ""
     sample_length_mm: float | None = None

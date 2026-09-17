@@ -13,7 +13,7 @@ def test_ads1115_voltage_and_shunt_current() -> None:
     assert voltage_to_current_ma(voltage) == pytest.approx(10.02004, rel=1e-5)
 
 
-@pytest.mark.parametrize("current,voltage", [(4.0, 0.5988), (20.0, 2.994)])
+@pytest.mark.parametrize("current,voltage", [(3.95, 0.591315), (20.0, 2.994)])
 def test_shunt_149_7_at_endpoints(current: float, voltage: float) -> None:
     assert voltage_to_current_ma(voltage, 149.7) == pytest.approx(current)
 

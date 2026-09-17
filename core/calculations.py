@@ -14,9 +14,7 @@ def current_to_engineering(
 ) -> float:
     if current_max == current_min:
         raise ValueError("A faixa de corrente não pode ter amplitude zero")
-    return lower + ((current_ma - current_min) / (current_max - current_min)) * (
-        upper - lower
-    )
+    return lower + ((current_ma - current_min) / (current_max - current_min)) * (upper - lower)
 
 
 def apply_gain_offset(value: float, gain: float = 1.0, offset: float = 0.0) -> float:

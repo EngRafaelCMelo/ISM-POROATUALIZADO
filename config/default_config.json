@@ -1,8 +1,7 @@
 {
   "aplicacao": {
-    "nome": "Supervisor de Porosímetro",
-    "versao": "1.5.0",
-    "equipamento": "Porosímetro ISM",
+    "nome": "Supervisório ISM – Permeabilímetro",
+    "equipamento": "Permeabilímetro ISM",
     "usuario": "Operador"
   },
   "comunicacao": {
@@ -24,7 +23,9 @@
     "fator_escala": 0.001,
     "timeout_s": 1.5,
     "intervalo_ms": 1000,
+    "stale_after_s": 3.0,
     "reconexao_automatica": true,
+    "log_frames": false,
     "configurado": true
   },
   "aquisicao": {
@@ -35,31 +36,33 @@
   "sensores": {
     "pressao": {
       "nome": "Pressão",
-      "unidade": "bar",
-      "corrente_min": 4.0,
+      "unidade": "psi",
+      "corrente_min": 3.95,
       "corrente_max": 20.0,
       "limite_inferior": 0.0,
-      "limite_superior": 100.0,
+      "limite_superior": 400.0,
       "ganho": 1.0,
       "offset": 0.0,
       "casas": 2,
       "tolerancia": 0.5,
-      "alerta": 90.0,
-      "critico": 100.0
+      "alerta": 360.0,
+      "critico": 400.0
     },
     "vazao": {
       "nome": "Vazão",
-      "unidade": "L/min",
+      "unidade": "NL/min",
       "corrente_min": 4.0,
       "corrente_max": 20.0,
-      "limite_inferior": 0.0,
-      "limite_superior": 5.0,
+      "limite_inferior": 5.0,
+      "limite_superior": 1000.0,
+      "f53_confirmado": false,
+      "validar_faixa": false,
       "ganho": 1.0,
       "offset": 0.0,
       "casas": 3,
       "tolerancia": 0.15,
-      "alerta": 4.5,
-      "critico": 5.0
+      "alerta": null,
+      "critico": null
     }
   },
   "calculos": {
@@ -74,6 +77,9 @@
     "ruido": 0.03,
     "intervalo_s": 1.0
   },
+  "preflight": {
+    "exigir_calibracao": false
+  },
   "interface": {
     "tema": "claro",
     "fonte": 10,
@@ -84,6 +90,7 @@
     "diretorio_exportacao": "",
     "separador_csv": ";",
     "backup_automatico": true,
+    "retencao_backups": 10,
     "retencao_logs_dias": 30
   }
 }

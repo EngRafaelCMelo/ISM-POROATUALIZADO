@@ -58,7 +58,29 @@ class Database:
             logger.exception("Banco indisponível")
             return False
 
+    def writable_check(self) -> bool:
+        """Confirma escrita sem persistir dados."""
+        connection = self.connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                "CREATE TEMP TABLE IF NOT EXISTS preflight_write_test(value INTEGER)"
+            )
+            connection.execute("INSERT INTO preflight_write_test(value) VALUES (1)")
+            connection.rollback()
+            return True
+        except sqlite3.Error:
+            connection.rollback()
+            logger.exception("Banco não gravável")
+            return False
+        finally:
+            connection.close()
+
     def close(self) -> None:
         """As conexões são curtas; checkpoint garante fechamento limpo do WAL."""
-        with self.connect() as connection:
+        connection = self.connect()
+        try:
             connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            connection.commit()
+        finally:
+            connection.close()

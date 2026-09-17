@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFrame,
@@ -27,6 +26,7 @@ class SensorCard(QFrame):
         self.decimals = decimals
         self.minimum: float | None = None
         self.maximum: float | None = None
+        self.last_reading: SensorReading | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(17, 14, 17, 14)
@@ -66,7 +66,10 @@ class SensorCard(QFrame):
         self.min_label = QLabel("—")
         self.max_label = QLabel("—")
         for text, row, col in [
-            ("Corrente", 0, 0), ("Faixa", 0, 2), ("Mínimo", 2, 0), ("Máximo", 2, 2)
+            ("Corrente", 0, 0),
+            ("Faixa", 0, 2),
+            ("Mínimo", 2, 0),
+            ("Máximo", 2, 2),
         ]:
             label = QLabel(text)
             label.setObjectName("muted")
@@ -78,36 +81,73 @@ class SensorCard(QFrame):
         details.setColumnStretch(1, 1)
         layout.addLayout(details)
 
-    def update_reading(self, reading: SensorReading, include_statistics: bool = True,
-                       unavailable_message: str | None = None) -> None:
+    def update_reading(
+        self,
+        reading: SensorReading,
+        include_statistics: bool = True,
+        unavailable_message: str | None = None,
+    ) -> None:
+        self.last_reading = reading
         if reading.value is None:
             self.value_label.setText(unavailable_message or "—")
         else:
             self.value_label.setText(f"{reading.value:.{self.decimals}f}")
             if include_statistics and reading.quality not in (
-                ReadingQuality.INVALID, ReadingQuality.MISSING
+                ReadingQuality.INVALID,
+                ReadingQuality.MISSING,
             ):
-                self.minimum = reading.value if self.minimum is None else min(self.minimum, reading.value)
-                self.maximum = reading.value if self.maximum is None else max(self.maximum, reading.value)
+                self.minimum = (
+                    reading.value if self.minimum is None else min(self.minimum, reading.value)
+                )
+                self.maximum = (
+                    reading.value if self.maximum is None else max(self.maximum, reading.value)
+                )
         self.current_label.setText(
             f"{reading.current_ma:.2f} mA" if reading.current_ma is not None else "— mA"
         )
         percent = range_percent(reading.value, self.lower, self.upper)
         self.percent_label.setText(f"{percent:.1f} %" if percent is not None else "— %")
         self.range_bar.setValue(round(percent or 0))
-        self.min_label.setText(f"{self.minimum:.{self.decimals}f}" if self.minimum is not None else "—")
-        self.max_label.setText(f"{self.maximum:.{self.decimals}f}" if self.maximum is not None else "—")
+        self.min_label.setText(
+            f"{self.minimum:.{self.decimals}f}" if self.minimum is not None else "—"
+        )
+        self.max_label.setText(
+            f"{self.maximum:.{self.decimals}f}" if self.maximum is not None else "—"
+        )
         style = {
             ReadingQuality.VALID: "good",
             ReadingQuality.SIMULATED: "warn",
             ReadingQuality.WARNING: "warn",
             ReadingQuality.INVALID: "bad",
+            ReadingQuality.STALE: "warn",
+            ReadingQuality.DISCONNECTED: "bad",
             ReadingQuality.MISSING: "neutral",
         }[reading.quality]
-        self.status_label.set_state(reading.quality.value.capitalize(), style)
+        status_text = {
+            ReadingQuality.VALID: "OK",
+            ReadingQuality.WARNING: "INVALID",
+            ReadingQuality.INVALID: "INVALID",
+            ReadingQuality.STALE: "STALE",
+            ReadingQuality.DISCONNECTED: "DISCONNECTED",
+            ReadingQuality.MISSING: "SEM DADOS",
+            ReadingQuality.SIMULATED: "SIMULADO",
+        }[reading.quality]
+        self.status_label.set_state(status_text, style)
         self.setProperty("state", style)
-        self.style().unpolish(self); self.style().polish(self)
-        self.updated_label.setText(f"Última atualização: {datetime.now():%H:%M:%S} · agora")
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.refresh_age()
+
+    def refresh_age(self) -> None:
+        reading = self.last_reading
+        if reading is None or reading.timestamp is None:
+            self.updated_label.setText("Última leitura: sem dados")
+            return
+        age = reading.age_seconds() or 0.0
+        status = reading.device_status or reading.quality.value.upper()
+        self.updated_label.setText(
+            f"Última leitura: {reading.timestamp:%H:%M:%S} · {age:.1f} s · {status}"
+        )
 
     def reset_statistics(self) -> None:
         self.minimum = self.maximum = None

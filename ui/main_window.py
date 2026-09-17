@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import logging
 import json
+import logging
 import os
 import shutil
 from collections import deque
@@ -10,30 +10,35 @@ from pathlib import Path
 from typing import Any
 
 import pyqtgraph as pg
-from PySide6.QtCore import QSize, QTimer, Qt
-from PySide6.QtGui import QAction, QCloseEvent, QIcon, QPixmap
+from PySide6.QtCore import QSize, Qt, QTimer
+from PySide6.QtGui import QCloseEvent, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
     QFileDialog,
     QFrame,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
-    QInputDialog,
-    QScrollArea,
 )
 
-from communication.serial_manager import FlowmeterWorker, SerialWorker, available_ports
+from communication.serial_manager import (
+    FlowmeterWorker,
+    SerialWorker,
+    available_port_details,
+)
 from communication.simulator import SimulatorWorker
 from config.settings import AppPaths, ConfigManager
 from core.constants import Severity, TestStatus
 from core.models import Alarm, Measurement
+from core.version import APP_NAME, APP_VERSION
 from database.database import Database
 from database.repositories import (
     CalculationRepository,
@@ -43,11 +48,11 @@ from database.repositories import (
 )
 from services.acquisition_service import AcquisitionService
 from services.export_service import ExportService
+from services.preflight_service import run_preflight
 from services.test_service import TestService
+from ui.calculation_page import CalculationPage
 from ui.dialogs.marker_dialog import MarkerDialog
 from ui.dialogs.test_dialog import TestSetupDialog
-from ui.workers import ExportWorker
-from ui.calculation_page import CalculationPage
 from ui.pages import (
     AboutPage,
     CalibrationPage,
@@ -58,9 +63,10 @@ from ui.pages import (
     SettingsPage,
     TestPage,
 )
-from ui.theme import COLORS, icon_path
 from ui.resources import branding_path
+from ui.theme import COLORS, icon_path
 from ui.widgets.components import StatusBadge
+from ui.workers import ExportWorker
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +88,7 @@ class MainWindow(QMainWindow):
         self.flowmeter_worker: FlowmeterWorker | None = None
         self.simulator: SimulatorWorker | None = None
         self.connected = False
+        self.flow_connected = False
         self.simulating = False
         self.export_workers: set[ExportWorker] = set()
         self.message_times: deque[datetime] = deque(maxlen=20)
@@ -96,7 +103,7 @@ class MainWindow(QMainWindow):
         self._refresh_ports()
         self._refresh_history()
         self._setup_timers()
-        self.setWindowTitle("Supervisório ISM – Permeabilímetro")
+        self.setWindowTitle(APP_NAME)
         self.resize(1500, 920)
         self.setMinimumSize(1180, 700)
 
@@ -115,9 +122,14 @@ class MainWindow(QMainWindow):
         side_layout.setContentsMargins(11, 17, 11, 17)
         brand = QLabel()
         brand.setObjectName("brandLogo")
-        brand.setPixmap(QPixmap(str(branding_path("ism_simbolo_transparente.png"))).scaled(
-            82, 58, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
-        ))
+        brand.setPixmap(
+            QPixmap(str(branding_path("ism_simbolo_transparente.png"))).scaled(
+                82,
+                58,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
         brand.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         brand_name = QLabel("PERMEABILÍMETRO SUPERVISÓRIO")
         brand_name.setObjectName("brandName")
@@ -130,9 +142,12 @@ class MainWindow(QMainWindow):
         self.nav_buttons: list[QPushButton] = []
         self.nav_by_page: dict[int, QPushButton] = {}
         nav_items = [
-            ("Visão geral", "overview", 0), ("Novo ensaio", "new_test", 1),
-            ("Histórico", "history", 4), ("Cálculos", "calculations", 2),
-            ("Calibração", "calibration", 5), ("Configurações", "settings", 6),
+            ("Visão geral", "overview", 0),
+            ("Novo ensaio", "new_test", 1),
+            ("Histórico", "history", 4),
+            ("Cálculos", "calculations", 2),
+            ("Calibração", "calibration", 5),
+            ("Configurações", "settings", 6),
         ]
         for text, icon, page_index in nav_items:
             button = QPushButton(text)
@@ -150,14 +165,24 @@ class MainWindow(QMainWindow):
         advanced = QLabel("FERRAMENTAS")
         advanced.setObjectName("sidebarCaption")
         side_layout.addWidget(advanced)
-        for text, icon, page_index in [("Gráficos avançados", "graphs", 3), ("Diagnóstico", "diagnostics", 7), ("Sobre", "about", 8)]:
-            button = QPushButton(text); button.setObjectName("navButton")
-            button.setIcon(QIcon(icon_path(icon))); button.setIconSize(QSize(19, 19))
-            button.setCheckable(True); button.setAutoExclusive(True)
+        for text, icon, page_index in [
+            ("Gráficos avançados", "graphs", 3),
+            ("Diagnóstico", "diagnostics", 7),
+            ("Sobre", "about", 8),
+        ]:
+            button = QPushButton(text)
+            button.setObjectName("navButton")
+            button.setIcon(QIcon(icon_path(icon)))
+            button.setIconSize(QSize(19, 19))
+            button.setCheckable(True)
+            button.setAutoExclusive(True)
             button.clicked.connect(lambda _checked=False, i=page_index: self._navigate(i))
-            side_layout.addWidget(button); self.nav_buttons.append(button); self.advanced_nav_buttons.append(button); self.nav_by_page[page_index] = button
+            side_layout.addWidget(button)
+            self.nav_buttons.append(button)
+            self.advanced_nav_buttons.append(button)
+            self.nav_by_page[page_index] = button
         side_layout.addStretch()
-        version = QLabel(f"Versão {self.config.get('aplicacao.versao', '1.0.0')}")
+        version = QLabel(f"Versão {APP_VERSION}")
         version.setObjectName("sidebarVersion")
         side_layout.addWidget(version)
         root_layout.addWidget(sidebar)
@@ -186,7 +211,9 @@ class MainWindow(QMainWindow):
         self.user_label = QLabel(f"Usuário: {self.config.get('aplicacao.usuario', 'Operador')}")
         self.clock_label.setVisible(False)
         self.user_label.setVisible(False)
-        self.user_label.setToolTip(f"Operador atual: {self.config.get('aplicacao.usuario', 'Operador')}")
+        self.user_label.setToolTip(
+            f"Operador atual: {self.config.get('aplicacao.usuario', 'Operador')}"
+        )
         top_layout.addWidget(self.mode_badge)
         top_layout.addWidget(self.connection_badge)
         top_layout.addWidget(self.equipment_badge)
@@ -246,10 +273,17 @@ class MainWindow(QMainWindow):
         self.calibration = CalibrationPage()
         self.settings = SettingsPage(self.config.data)
         self.diagnostics = DiagnosticsPage()
-        self.about = AboutPage(self.config.get("aplicacao.versao", "2.0.0"))
+        self.about = AboutPage(APP_VERSION)
         for page in (
-            self.overview, self.test_page, self.calculations, self.graphs, self.history,
-            self.calibration, self.settings, self.diagnostics, self.about,
+            self.overview,
+            self.test_page,
+            self.calculations,
+            self.graphs,
+            self.history,
+            self.calibration,
+            self.settings,
+            self.diagnostics,
+            self.about,
         ):
             self.stack.addWidget(page)
         # A 1360x728 display leaves less vertical space after the Windows
@@ -288,6 +322,8 @@ class MainWindow(QMainWindow):
         self.diagnostics.open_logs_requested.connect(lambda: os.startfile(self.paths.logs))
         self.diagnostics.restart_requested.connect(self._restart_connection)
         self.acquisition.measurement_ready.connect(self._on_measurement)
+        self.acquisition.pressure_updated.connect(self._on_pressure_updated)
+        self.acquisition.flow_updated.connect(self._on_flow_updated)
         self.acquisition.alarm_raised.connect(self._on_alarm)
         self.acquisition.counters_changed.connect(self._update_counters)
         self.acquisition.timeout_detected.connect(self._on_timeout)
@@ -295,7 +331,9 @@ class MainWindow(QMainWindow):
     def _load_style(self) -> None:
         style_path = Path(__file__).with_name("styles.qss")
         self.setStyleSheet(style_path.read_text(encoding="utf-8"))
-        pg.setConfigOptions(antialias=True, foreground=COLORS["muted"], background=COLORS["surface"])
+        pg.setConfigOptions(
+            antialias=True, foreground=COLORS["muted"], background=COLORS["surface"]
+        )
 
     def _setup_timers(self) -> None:
         self.clock_timer = QTimer(self)
@@ -305,7 +343,17 @@ class MainWindow(QMainWindow):
 
     def _navigate(self, index: int) -> None:
         self.stack.setCurrentIndex(index)
-        titles = {0: "Visão geral", 1: "Novo ensaio", 2: "Cálculos", 3: "Gráficos avançados", 4: "Histórico de ensaios", 5: "Calibração", 6: "Configurações", 7: "Diagnóstico", 8: "Sobre"}
+        titles = {
+            0: "Visão geral",
+            1: "Novo ensaio",
+            2: "Cálculos",
+            3: "Gráficos avançados",
+            4: "Histórico de ensaios",
+            5: "Calibração",
+            6: "Configurações",
+            7: "Diagnóstico",
+            8: "Sobre",
+        }
         self.header_title.setText(titles.get(index, "Supervisor"))
         button = self.nav_by_page.get(index)
         if button:
@@ -322,25 +370,37 @@ class MainWindow(QMainWindow):
             label.set_state(text, state)
             return
         label.setText(text)
-        label.setObjectName({
-            "good": "pillGood", "warn": "pillWarn", "bad": "pillBad"
-        }.get(state, "pillNeutral"))
+        label.setObjectName(
+            {"good": "pillGood", "warn": "pillWarn", "bad": "pillBad"}.get(state, "pillNeutral")
+        )
         label.style().unpolish(label)
         label.style().polish(label)
 
     def _refresh_ports(self) -> None:
         selected = self.port_combo.currentData()
+        flow_selected = self.flow_port_combo.currentData()
         self.port_combo.clear()
-        ports = available_ports()
+        ports = available_port_details()
         configured = self.config.get("comunicacao.porta", "")
-        for device, description in ports:
-            self.port_combo.addItem(f"{device} — {description}", device)
+        configured_identity = self.config.get("comunicacao.identidade_porta", "")
+        if configured_identity:
+            configured = next(
+                (p.device for p in ports if p.identity == configured_identity), configured
+            )
+        for port in ports:
+            self.port_combo.addItem(f"{port.device} — {port.description}", port.device)
+            self.port_combo.setItemData(
+                self.port_combo.count() - 1, port.identity, Qt.ItemDataRole.UserRole + 1
+            )
         if not ports:
             self.port_combo.addItem("Nenhum ESP32 detectado", "")
         self.flow_port_combo.clear()
         if ports:
-            for device, description in ports:
-                self.flow_port_combo.addItem(f"{device} — {description}", device)
+            for port in ports:
+                self.flow_port_combo.addItem(f"{port.device} — {port.description}", port.device)
+                self.flow_port_combo.setItemData(
+                    self.flow_port_combo.count() - 1, port.identity, Qt.ItemDataRole.UserRole + 1
+                )
         else:
             self.flow_port_combo.addItem("Nenhum adaptador detectado", "")
         target = selected or configured
@@ -349,10 +409,12 @@ class MainWindow(QMainWindow):
                 self.port_combo.setCurrentIndex(index)
                 break
         flow_configured = self.config.get("flowmeter.porta", "")
-        flow_target = flow_configured or next(
-            (candidate for candidate in ("COM4", "COM7")
-             if any(device == candidate for device, _ in ports)), ""
-        )
+        flow_identity = self.config.get("flowmeter.identidade_porta", "")
+        if flow_identity:
+            flow_configured = next(
+                (p.device for p in ports if p.identity == flow_identity), flow_configured
+            )
+        flow_target = flow_selected or flow_configured
         for index in range(self.flow_port_combo.count()):
             if self.flow_port_combo.itemData(index) == flow_target:
                 self.flow_port_combo.setCurrentIndex(index)
@@ -360,7 +422,9 @@ class MainWindow(QMainWindow):
         serial_active = bool(self.serial_worker and self.serial_worker.isRunning())
         self.connect_button.setEnabled(bool(ports) or serial_active)
         self.statusBar().showMessage(
-            f"{len(ports)} porta(s) encontrada(s)" if ports else "Conecte o ESP32 e clique em Atualizar",
+            f"{len(ports)} porta(s) encontrada(s)"
+            if ports
+            else "Conecte o ESP32 e clique em Atualizar",
             3000,
         )
 
@@ -373,14 +437,26 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Flowmeter", "Selecione a porta USB–RS485.")
             return
         if port == self.port_combo.currentData():
-            QMessageBox.warning(self, "Flowmeter", "ESP32 e flowmeter precisam usar portas COM diferentes.")
+            QMessageBox.warning(
+                self, "Flowmeter", "ESP32 e flowmeter precisam usar portas COM diferentes."
+            )
             return
-        self.config.set("flowmeter.porta", port)
-        self.flowmeter_worker = FlowmeterWorker(self.config.get("flowmeter", {}))
+        self.config.data["flowmeter"]["porta"] = port
+        self.config.data["flowmeter"]["identidade_porta"] = (
+            self.flow_port_combo.currentData(Qt.ItemDataRole.UserRole + 1) or ""
+        )
+        self.config.save()
+        try:
+            self.flowmeter_worker = FlowmeterWorker(self.config.get("flowmeter", {}))
+        except ValueError as exc:
+            QMessageBox.critical(self, "Configuração do flowmeter", str(exc))
+            return
         self.flowmeter_worker.reading_received.connect(self.acquisition.process_flow)
         self.flowmeter_worker.communication_error.connect(self.acquisition.process_flow_error)
         self.flowmeter_worker.state_changed.connect(self._on_flowmeter_state)
         self.flowmeter_worker.communication_error.connect(self._on_flowmeter_error)
+        self.flowmeter_worker.statistics_changed.connect(self._on_flowmeter_statistics)
+        self.flowmeter_worker.frame_logged.connect(self._on_modbus_frame)
         self.flowmeter_worker.start()
         self.flow_connect_button.setText("Desconectar flowmeter")
 
@@ -388,13 +464,17 @@ class MainWindow(QMainWindow):
         if self.flowmeter_worker:
             self.flowmeter_worker.stop()
             self.flowmeter_worker = None
+        self.flow_connected = False
         self.acquisition.process_flow_error("SEM_COMUNICACAO")
         self.flow_connect_button.setText("Conectar flowmeter")
 
     def _on_flowmeter_state(self, connected: bool, message: str) -> None:
+        self.flow_connected = connected
         self.statusBar().showMessage(message, 5000)
         if connected:
             self.flow_connect_button.setText("Desconectar flowmeter")
+        else:
+            self.acquisition.process_flow_error("PORTA_DESCONECTADA")
 
     def _on_flowmeter_error(self, message: str) -> None:
         self.statusBar().showMessage(f"Flowmeter: {message}", 8000)
@@ -408,8 +488,22 @@ class MainWindow(QMainWindow):
         if not port:
             QMessageBox.warning(self, "Porta serial", "Selecione uma porta serial válida.")
             return
+        if port == self.flow_port_combo.currentData():
+            QMessageBox.warning(
+                self, "Portas COM", "ESP32 e flowmeter precisam usar portas COM diferentes."
+            )
+            return
         self._stop_simulation()
-        self.serial_worker = SerialWorker(port, int(self.baud_combo.currentText()), reconnect=bool(self.config.get("comunicacao.reconexao_automatica", True)))
+        self.config.data["comunicacao"]["porta"] = port
+        self.config.data["comunicacao"]["identidade_porta"] = (
+            self.port_combo.currentData(Qt.ItemDataRole.UserRole + 1) or ""
+        )
+        self.config.save()
+        self.serial_worker = SerialWorker(
+            port,
+            int(self.baud_combo.currentText()),
+            reconnect=bool(self.config.get("comunicacao.reconexao_automatica", True)),
+        )
         self.serial_worker.line_received.connect(self.acquisition.process_real)
         self.serial_worker.state_changed.connect(self._on_connection_state)
         self.serial_worker.communication_error.connect(self._on_serial_error)
@@ -436,6 +530,7 @@ class MainWindow(QMainWindow):
             float(self.config.get("simulacao.ruido", 0.03)),
         )
         self.simulator.line_generated.connect(self.acquisition.process_simulated)
+        self.simulator.flow_generated.connect(self.acquisition.process_simulated_flow)
         self.simulator.state_changed.connect(self._on_simulation_state)
         self.simulator.start()
         self._apply_sim_fault()
@@ -454,14 +549,18 @@ class MainWindow(QMainWindow):
         fault = self.sim_fault.currentData()
         self.simulator.sensor_disconnected = fault == "sensor"
         self.simulator.communication_loss = fault == "perda"
-        self.simulator.current_fault = fault if fault in (
-            "abaixo", "critico_baixo", "acima", "critico_alto"
-        ) else "normal"
+        self.simulator.current_fault = (
+            fault if fault in ("abaixo", "critico_baixo", "acima", "critico_alto") else "normal"
+        )
 
     def _on_connection_state(self, connected: bool, message: str) -> None:
         self.connected = connected
-        self._set_badge(self.connection_badge, "Conectado" if connected else "Desconectado",
-                        "good" if connected else "neutral")
+        self.acquisition.process_pressure_connection(connected, message)
+        self._set_badge(
+            self.connection_badge,
+            "Conectado" if connected else "Desconectado",
+            "good" if connected else "neutral",
+        )
         self.diagnostics.values["connection"].setText(message)
         self.diagnostics.values["mode"].setText("Real")
         self.mode_badge.set_state("MODO REAL", "info")
@@ -473,12 +572,15 @@ class MainWindow(QMainWindow):
         self.connected = active
         self.simulation_button.setText("Parar simulação" if active else "Iniciar simulação")
         self._set_badge(
-            self.connection_badge, "Simulação ativa" if active else "Desconectado",
+            self.connection_badge,
+            "Simulação ativa" if active else "Desconectado",
             "warn" if active else "neutral",
         )
         self.diagnostics.values["connection"].setText(message)
         self.diagnostics.values["mode"].setText("Simulação" if active else "—")
-        self.mode_badge.set_state("SIMULAÇÃO" if active else "MODO REAL", "warn" if active else "info")
+        self.mode_badge.set_state(
+            "SIMULAÇÃO" if active else "MODO REAL", "warn" if active else "info"
+        )
         self.overview.simulation_banner.setVisible(active)
 
     def _on_serial_error(self, message: str) -> None:
@@ -489,17 +591,20 @@ class MainWindow(QMainWindow):
         )
 
     def _on_measurement(self, measurement: Measurement) -> None:
-        self.message_times.append(measurement.received_at)
-        self.overview.update_measurement(measurement)
-        self.graphs.add_measurement(measurement)
-        self.calibration.update_measurement(measurement)
+        self._last_firmware_version = measurement.firmware_version
         self.calculations.update_measurement(measurement)
         self.diagnostics.raw.setPlainText(measurement.raw_message)
-        self.diagnostics.values["ma_pressure"].setText(self._format_ma(measurement.pressure.current_ma))
+        self.diagnostics.values["ma_pressure"].setText(
+            self._format_ma(measurement.pressure.current_ma)
+        )
         self.diagnostics.values["flow_health"].setText("OK" if measurement.flow.valid else "Falha")
         self.diagnostics.values["reading_age"].setText("0.0 s")
         healthy = measurement.pressure.valid and measurement.flow.valid
-        self._set_badge(self.equipment_badge, "Operação normal" if healthy else "Sensor em falha", "good" if healthy else "bad")
+        self._set_badge(
+            self.equipment_badge,
+            "Operação normal" if healthy else "Sensor em falha",
+            "good" if healthy else "bad",
+        )
         if self.test_service.current and measurement.recordable:
             try:
                 recorded = self.test_service.record(measurement)
@@ -510,10 +615,32 @@ class MainWindow(QMainWindow):
                 logger.exception("Falha ao registrar medição")
                 self._set_badge(self.equipment_badge, "Falha de gravação", "bad")
                 alarm = Alarm(
-                    datetime.now(), "Banco", Severity.CRITICAL, "banco",
-                    f"Falha na gravação: {exc}"
+                    datetime.now(), "Banco", Severity.CRITICAL, "banco", f"Falha na gravação: {exc}"
                 )
                 self._on_alarm(alarm)
+
+    def _on_pressure_updated(self, reading) -> None:
+        if reading.timestamp:
+            self.message_times.append(reading.timestamp)
+        self.overview.update_pressure(reading)
+        self.graphs.add_pressure(reading)
+        pressure_only = Measurement(datetime.now(), pressure=reading, recordable=False)
+        self.calibration.update_measurement(pressure_only)
+        self.diagnostics.values["ma_pressure"].setText(self._format_ma(reading.current_ma))
+
+    def _on_flow_updated(self, reading) -> None:
+        self.overview.update_flow(reading)
+        self.graphs.add_flow(reading)
+        self.diagnostics.values["flow_health"].setText(
+            reading.device_status or reading.quality.value
+        )
+
+    def _on_flowmeter_statistics(self, statistics: dict) -> None:
+        summary = " | ".join(f"{key}: {value}" for key, value in statistics.items())
+        self.diagnostics.values["modbus_stats"].setText(summary)
+
+    def _on_modbus_frame(self, direction: str, frame: str) -> None:
+        self.diagnostics.frames.appendPlainText(f"{datetime.now():%H:%M:%S.%f} {direction} {frame}")
 
     @staticmethod
     def _format_ma(value: float | None) -> str:
@@ -545,30 +672,54 @@ class MainWindow(QMainWindow):
 
     def _start_test(self) -> None:
         if self.test_service.current:
-            QMessageBox.information(self, "Ensaio ativo", "Finalize o ensaio atual antes de iniciar outro.")
+            QMessageBox.information(
+                self, "Ensaio ativo", "Finalize o ensaio atual antes de iniciar outro."
+            )
             return
         if self.simulating:
             response = QMessageBox.question(
-                self, "Ensaio simulado",
+                self,
+                "Ensaio simulado",
                 "Os dados não vêm do equipamento real e o relatório será marcado como SIMULADO. Continuar?",
             )
             if response != QMessageBox.StandardButton.Yes:
                 return
         else:
-            errors = self.config.real_mode_errors()
-            if errors:
-                QMessageBox.critical(self, "Configuração real incompleta", "Não é seguro iniciar o ensaio real:\n\n• " + "\n• ".join(errors))
+            preflight = run_preflight(
+                self.config.data,
+                self.acquisition.preflight_snapshot(),
+                esp32_connected=self.connected,
+                flowmeter_connected=self.flow_connected,
+                database_writable=self.database.writable_check(),
+                configuration_errors=self.config.real_mode_errors(),
+                calibration_available=self.calibration_repository.active_exists("pressao"),
+            )
+            if not preflight.ok:
+                QMessageBox.critical(
+                    self,
+                    "Preflight reprovado",
+                    "Corrija os itens abaixo antes do ensaio real:\n\n• "
+                    + "\n• ".join(preflight.errors),
+                )
                 return
         dialog = TestSetupDialog(
             self.test_repository.next_code(),
             Path(self.config.get("dados.diretorio_exportacao") or self.paths.exports),
             self,
+            pressure_unit=str(self.config.get("sensores.pressao.unidade", "psi")),
+            expected_pressure_range=(
+                f"{self.config.get('sensores.pressao.limite_inferior', 0):g}–"
+                f"{self.config.get('sensores.pressao.limite_superior', 400):g} "
+                f"{self.config.get('sensores.pressao.unidade', 'psi')}"
+            ),
         )
         if dialog.exec() != dialog.DialogCode.Accepted:
             return
         try:
             definition = dialog.definition()
-            definition.configuration_snapshot = json.dumps(self.config.data, ensure_ascii=False, sort_keys=True)
+            definition.configuration_snapshot = json.dumps(
+                self.config.data, ensure_ascii=False, sort_keys=True
+            )
             definition.firmware_version = getattr(self, "_last_firmware_version", "")
             definition.simulated = self.simulating
             session = self.test_service.start(definition)
@@ -579,7 +730,9 @@ class MainWindow(QMainWindow):
             self.calculation_test_id = session.id
             self.overview.reset_test()
             self.overview.set_test_active(True)
-            self.current_test_label.setText(f"{session.definition.code} — {session.definition.sample_name}")
+            self.current_test_label.setText(
+                f"{session.definition.code} — {session.definition.sample_name}"
+            )
             self._navigate(0)
             self.nav_by_page[0].setChecked(True)
         except Exception as exc:
@@ -598,7 +751,8 @@ class MainWindow(QMainWindow):
         if not self.test_service.current:
             return
         response = QMessageBox.question(
-            self, "Finalizar ensaio",
+            self,
+            "Finalizar ensaio",
             "Deseja finalizar o ensaio? Após finalizar, novas leituras não serão registradas.",
         )
         if response != QMessageBox.StandardButton.Yes:
@@ -619,7 +773,8 @@ class MainWindow(QMainWindow):
             self.export_service.export_pdf(session.id, report_directory)
             self.overview.set_report_ready(True)
             QMessageBox.information(
-                self, "Ensaio finalizado",
+                self,
+                "Ensaio finalizado",
                 f"Ensaio {session.definition.code} salvo com {session.sample_count} amostras.",
             )
         except Exception as exc:
@@ -654,7 +809,8 @@ class MainWindow(QMainWindow):
         alarms = self.event_repository.alarms(test_id)
         markers = self.event_repository.markers(test_id)
         QMessageBox.information(
-            self, f"Ensaio {row['codigo']}",
+            self,
+            f"Ensaio {row['codigo']}",
             f"Amostra: {row['amostra_nome']}\nOperador: {row['operador']}\n"
             f"Início: {row['inicio']}\nStatus: {row['status']}\n"
             f"Medições: {len(measurements)}\nAlarmes: {len(alarms)}\nMarcações: {len(markers)}\n\n"
@@ -672,10 +828,13 @@ class MainWindow(QMainWindow):
         from core.models import TestDefinition
 
         return TestDefinition(
-            code=row["codigo"], sample_name=row["amostra_nome"],
+            code=row["codigo"],
+            sample_name=row["amostra_nome"],
             sample_identification=row["amostra_identificacao"] or "",
-            operator=row["operador"], description=row["descricao"] or "",
-            test_type=row["tipo"] or "Permeabilidade", notes=row["observacoes"] or "",
+            operator=row["operador"],
+            description=row["descricao"] or "",
+            test_type=row["tipo"] or "Permeabilidade",
+            notes=row["observacoes"] or "",
             expected_pressure_range=row["faixa_pressao"] or "",
             pressure_unit=row["unidade_pressao"] or "bar",
             flow_unit=row["unidade_vazao"] or "L/min",
@@ -683,8 +842,10 @@ class MainWindow(QMainWindow):
             export_directory=row["diretorio_exportacao"] or "",
             sample_length_mm=row["comprimento_amostra_mm"],
             sample_diameter_mm=row["diametro_amostra_mm"],
-            sample_mass_g=row["massa_amostra_g"], bulk_volume_cm3=row["volume_geometrico_cm3"],
-            gas_type=row["tipo_gas"] or "Helio", temperature_c=row["temperatura_c"] or 20.0,
+            sample_mass_g=row["massa_amostra_g"],
+            bulk_volume_cm3=row["volume_geometrico_cm3"],
+            gas_type=row["tipo_gas"] or "Helio",
+            temperature_c=row["temperatura_c"] or 20.0,
             atmospheric_pressure_kpa=row["pressao_atmosferica_kpa"] or 101.325,
             pressure_reference=row["referencia_pressao"] or "manometrica",
             configuration_snapshot=row["configuracao_json"] or "",
@@ -697,7 +858,8 @@ class MainWindow(QMainWindow):
     ) -> None:
         if self.calculation_test_id is None:
             QMessageBox.warning(
-                self, "Salvar cálculo",
+                self,
+                "Salvar cálculo",
                 "Inicie um ensaio ou abra um ensaio do histórico antes de salvar.",
             )
             return
@@ -714,7 +876,8 @@ class MainWindow(QMainWindow):
     def _refresh_calculation_history(self) -> None:
         rows = (
             self.calculation_repository.list(self.calculation_test_id)
-            if self.calculation_test_id is not None else []
+            if self.calculation_test_id is not None
+            else []
         )
         self.calculations.populate_history(rows)
 
@@ -722,18 +885,35 @@ class MainWindow(QMainWindow):
         row = self.test_repository.get(test_id)
         if not row:
             return
-        default = row["diretorio_exportacao"] or self.config.get(
-            "dados.diretorio_exportacao"
-        ) or self.paths.exports
+        default = (
+            row["diretorio_exportacao"]
+            or self.config.get("dados.diretorio_exportacao")
+            or self.paths.exports
+        )
         directory = QFileDialog.getExistingDirectory(self, "Diretório de exportação", str(default))
         if not directory:
             return
-        method = {"csv": self.export_service.export_csv, "xlsx": self.export_service.export_xlsx, "json": self.export_service.export_json, "pdf": self.export_service.export_pdf}[format_name]
-        args: tuple[object, ...] = (test_id, Path(directory), self.config.get("dados.separador_csv", ";")) if format_name == "csv" else (test_id, Path(directory))
+        method = {
+            "csv": self.export_service.export_csv,
+            "xlsx": self.export_service.export_xlsx,
+            "json": self.export_service.export_json,
+            "pdf": self.export_service.export_pdf,
+        }[format_name]
+        args: tuple[object, ...] = (
+            (test_id, Path(directory), self.config.get("dados.separador_csv", ";"))
+            if format_name == "csv"
+            else (test_id, Path(directory))
+        )
         worker = ExportWorker(method, args)
         self.export_workers.add(worker)
-        worker.completed.connect(lambda target: QMessageBox.information(self, "Exportação concluída", f"Arquivo salvo em:\n{target}"))
-        worker.failed.connect(lambda error: QMessageBox.critical(self, "Falha na exportação", error))
+        worker.completed.connect(
+            lambda target: QMessageBox.information(
+                self, "Exportação concluída", f"Arquivo salvo em:\n{target}"
+            )
+        )
+        worker.failed.connect(
+            lambda error: QMessageBox.critical(self, "Falha na exportação", error)
+        )
         worker.finished.connect(lambda: self.export_workers.discard(worker))
         worker.finished.connect(worker.deleteLater)
         worker.start()
@@ -744,7 +924,8 @@ class MainWindow(QMainWindow):
         if not row:
             return
         response = QMessageBox.warning(
-            self, "Excluir ensaio",
+            self,
+            "Excluir ensaio",
             f"Excluir permanentemente {row['codigo']} e todas as suas medições?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
@@ -754,22 +935,36 @@ class MainWindow(QMainWindow):
             self._refresh_history()
 
     def _invalidate_test(self, test_id: int) -> None:
-        if QMessageBox.question(
-            self, "Marcar como inválido", "Manter os dados e marcar este ensaio como inválido?"
-        ) == QMessageBox.StandardButton.Yes:
+        if (
+            QMessageBox.question(
+                self, "Marcar como inválido", "Manter os dados e marcar este ensaio como inválido?"
+            )
+            == QMessageBox.StandardButton.Yes
+        ):
             self.test_repository.invalidate(test_id)
             self._refresh_history()
 
     def _save_calibration(
-        self, sensor: str, gain: float, offset: float, error: float,
-        stable: bool, points: list[tuple[float, float]], notes: str,
+        self,
+        sensor: str,
+        gain: float,
+        offset: float,
+        error: float,
+        stable: bool,
+        points: list[tuple[float, float]],
+        notes: str,
     ) -> None:
-        if not stable and QMessageBox.warning(
-            self, "Calibração instável",
-            "As amostras foram classificadas como instáveis. Deseja salvar mesmo assim?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        ) != QMessageBox.StandardButton.Yes:
+        if (
+            not stable
+            and QMessageBox.warning(
+                self,
+                "Calibração instável",
+                "As amostras foram classificadas como instáveis. Deseja salvar mesmo assim?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
             return
         operator = self.calibration.operator.text().strip() or "Operador"
         self.calibration_repository.save(
@@ -790,7 +985,8 @@ class MainWindow(QMainWindow):
             ConfigManager._deep_update(self.config.data, values)
             self.config.save()
             QMessageBox.information(
-                self, "Configurações",
+                self,
+                "Configurações",
                 "Configurações salvas. As alterações dos sensores serão aplicadas na próxima inicialização.",
             )
         except (ValueError, OSError) as exc:
@@ -829,13 +1025,18 @@ class MainWindow(QMainWindow):
 
     def _restart_connection(self) -> None:
         was_simulating = self.simulating
+        had_serial = bool(self.serial_worker)
+        had_flowmeter = bool(self.flowmeter_worker)
         self._stop_serial()
         self._stop_flowmeter()
         self._stop_simulation()
         if was_simulating:
             self._toggle_simulation()
-        elif self.port_combo.currentData():
+            return
+        if had_serial and self.port_combo.currentData():
             self._toggle_serial()
+        if had_flowmeter and self.flow_port_combo.currentData():
+            self._toggle_flowmeter()
 
     def _update_clock_and_status(self) -> None:
         now = datetime.now()
@@ -856,21 +1057,33 @@ class MainWindow(QMainWindow):
             age = (now - self.acquisition.last_message_at).total_seconds()
             self.diagnostics.values["last_age"].setText(f"{age:.1f} s")
             self.diagnostics.values["reading_age"].setText(f"{age:.1f} s")
+        for card in self.overview.cards.values():
+            card.refresh_age()
         self.diagnostics.values["database"].setText(
             "Operacional" if self.database.health_check() else "Falha"
         )
         self.diagnostics.values["db_path"].setText(str(self.database.path))
-        self.diagnostics.values["version"].setText(self.config.get("aplicacao.versao", "1.0.0"))
+        self.diagnostics.values["version"].setText(APP_VERSION)
         try:
-            free = shutil.disk_usage(self.database.path.parent).free / (1024 ** 3)
+            free = shutil.disk_usage(self.database.path.parent).free / (1024**3)
             self.diagnostics.values["disk"].setText(f"{free:.1f} GB livres")
         except OSError:
             self.diagnostics.values["disk"].setText("Indisponível")
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        running_exports = [worker for worker in self.export_workers if worker.isRunning()]
+        if running_exports:
+            QMessageBox.information(
+                self,
+                "Exportação em andamento",
+                "Aguarde a exportação terminar antes de fechar o aplicativo.",
+            )
+            event.ignore()
+            return
         if self.test_service.current:
             response = QMessageBox.warning(
-                self, "Ensaio em andamento",
+                self,
+                "Ensaio em andamento",
                 "Há um ensaio ativo. Fechar agora preservará os dados e o marcará como interrompido.\n\n"
                 "Deseja realmente sair?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -879,10 +1092,13 @@ class MainWindow(QMainWindow):
             if response != QMessageBox.StandardButton.Yes:
                 event.ignore()
                 return
+            interrupted = self.test_repository.mark_interrupted_tests()
+            logger.warning(
+                "Encerramento com %s ensaio(s) marcado(s) como interrompido(s)", interrupted
+            )
         self._stop_serial()
         self._stop_flowmeter()
         self._stop_simulation()
-        for worker in tuple(self.export_workers):
-            worker.wait(5000)
+        self.acquisition.stop()
         self.database.close()
         event.accept()
