@@ -97,6 +97,41 @@ class Measurement:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class MeasurementSnapshot:
+    """Cópia imutável da medição combinada usada por um cálculo."""
+
+    captured_at: datetime
+    received_at: datetime
+    pressure_value: float
+    flow_value: float
+    pressure_timestamp: datetime
+    flow_timestamp: datetime
+    pressure_status: str
+    flow_status: str
+    pressure_quality: str
+    flow_quality: str
+    pressure_valid: bool
+    flow_valid: bool
+    pressure_raw: int | float | None
+    flow_raw: int | float | None
+    pressure_current_ma: float | None
+    device_timestamp_ms: int | None
+    sequence: int | None
+    schema_version: int | None
+    firmware_version: str
+    communication_state: str
+    delta_seconds: float
+    simulated: bool
+    origin: str = "leitura_combinada"
+
+    def as_dict(self) -> dict[str, Any]:
+        result = asdict(self)
+        for key in ("captured_at", "received_at", "pressure_timestamp", "flow_timestamp"):
+            result[key] = result[key].isoformat()
+        return result
+
+
 @dataclass(slots=True)
 class TestDefinition:
     code: str

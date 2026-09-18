@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from core.models import Measurement, TestDefinition
+from core.models import Measurement, MeasurementSnapshot, TestDefinition
 from core.permeability import (
     GAS_PROPERTIES,
     absolute_pressure_kpa,
@@ -59,6 +59,8 @@ class CalculationPage(QWidget):
         self._dirty_results = set()
         self._read_only = False
         self._captured = False
+        self._captured_snapshot: MeasurementSnapshot | None = None
+        self._captured_input_signature: tuple[Any, ...] | None = None
         root = QVBoxLayout(self)
         title = QLabel("Permeabilidade")
         title.setObjectName("pageTitle")
@@ -133,13 +135,13 @@ class CalculationPage(QWidget):
         ll.addLayout(form)
         self.current = QLabel("Leituras: pressão — | vazão —")
         ll.addWidget(self.current)
-        b = QPushButton("Capturar entrada e vazão")
-        b.clicked.connect(self._capture)
-        ll.addWidget(b)
-        b = QPushButton("Calcular permeabilidade")
-        b.setObjectName("primary")
-        b.clicked.connect(self._calculate)
-        ll.addWidget(b)
+        self.capture_button = QPushButton("Capturar entrada e vazão")
+        self.capture_button.clicked.connect(self._capture)
+        ll.addWidget(self.capture_button)
+        self.calculate_button = QPushButton("Calcular permeabilidade")
+        self.calculate_button.setObjectName("primary")
+        self.calculate_button.clicked.connect(self._calculate)
+        ll.addWidget(self.calculate_button)
         self.result = QTableWidget(0, 2)
         self.result.setHorizontalHeaderLabels(["Grandeza", "Resultado"])
         self.result.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
@@ -211,6 +213,8 @@ class CalculationPage(QWidget):
             self.gas.setCurrentIndex(max(0, self.gas.findData(definition.gas_type)))
         for widget in (self.save_permeability, self.save_klinkenberg):
             widget.setEnabled(False)
+        self.capture_button.setEnabled(bool(definition) and not self._read_only)
+        self.calculate_button.setEnabled(bool(definition) and not self._read_only)
 
     def update_measurement(self, m: Measurement):
         self.current_measurement = m
@@ -223,11 +227,93 @@ class CalculationPage(QWidget):
             return QMessageBox.information(
                 self, "Aguardando leituras", "Conecte o ESP32 ou inicie o simulador."
             )
-        if self.current_measurement.pressure.value is not None:
-            self.inlet.setValue(self.current_measurement.pressure.value)
-        if self.current_measurement.flow.value is not None:
-            self.flow.setValue(self.current_measurement.flow.value)
+        measurement = self.current_measurement
+        if not measurement.pressure.valid or not measurement.flow.valid:
+            return QMessageBox.warning(
+                self,
+                "Captura indisponível",
+                "A pressão e a vazão precisam estar presentes, válidas e atualizadas.",
+            )
+        if measurement.communication_state.upper() != "OK":
+            return QMessageBox.warning(
+                self,
+                "Captura indisponível",
+                f"A medição combinada não está sincronizada ({measurement.communication_state}).",
+            )
+        pressure_time = measurement.pressure.timestamp
+        flow_time = measurement.flow.timestamp
+        if pressure_time is None or flow_time is None:
+            return QMessageBox.warning(
+                self, "Captura indisponível", "Os dois sensores precisam possuir timestamp."
+            )
+        delta = abs((pressure_time - flow_time).total_seconds())
+        tolerance = max(0.1, float(self.config.get("aquisicao", {}).get("intervalo_s", 1.0)))
+        if delta > tolerance + 0.05:
+            return QMessageBox.warning(
+                self,
+                "Captura indisponível",
+                f"Diferença temporal de {delta:.3f} s excede a tolerância de {tolerance:.3f} s.",
+            )
+        identity = (pressure_time, flow_time, measurement.sequence)
+        if self._captured_snapshot and identity == (
+            self._captured_snapshot.pressure_timestamp,
+            self._captured_snapshot.flow_timestamp,
+            self._captured_snapshot.sequence,
+        ):
+            return QMessageBox.information(
+                self,
+                "Leitura já capturada",
+                "Aguarde uma nova medição combinada antes de capturar.",
+            )
+        self.inlet.setValue(float(measurement.pressure.value))
+        self.flow.setValue(float(measurement.flow.value))
+        self._captured_snapshot = MeasurementSnapshot(
+            captured_at=datetime.now(),
+            received_at=measurement.received_at,
+            pressure_value=float(measurement.pressure.value),
+            flow_value=float(measurement.flow.value),
+            pressure_timestamp=pressure_time,
+            flow_timestamp=flow_time,
+            pressure_status=measurement.pressure.device_status,
+            flow_status=measurement.flow.device_status,
+            pressure_quality=measurement.pressure.quality.value,
+            flow_quality=measurement.flow.quality.value,
+            pressure_valid=measurement.pressure.valid,
+            flow_valid=measurement.flow.valid,
+            pressure_raw=measurement.pressure.raw_value,
+            flow_raw=measurement.flow.raw_value,
+            pressure_current_ma=measurement.pressure.current_ma,
+            device_timestamp_ms=measurement.device_timestamp_ms,
+            sequence=measurement.sequence,
+            schema_version=measurement.schema_version,
+            firmware_version=measurement.firmware_version,
+            communication_state=measurement.communication_state,
+            delta_seconds=delta,
+            simulated=measurement.simulated,
+        )
         self._captured = True
+        self._captured_input_signature = self._input_signature()
+        self.current.setText(
+            f"Snapshot capturado: pressão {measurement.pressure.value} | "
+            f"vazão {measurement.flow.value} | Δt {delta:.3f} s"
+        )
+
+    def _input_signature(self) -> tuple[Any, ...]:
+        return (
+            self.inlet.value(),
+            self.outlet.value(),
+            self.flow.value(),
+            self.flow_ref.value(),
+            self.length.value(),
+            self.diameter.value(),
+            self.temperature.value(),
+            self.viscosity.value(),
+            self.atmospheric.value(),
+            self.unit.currentText(),
+            self.reference.currentData(),
+            self.outlet_mode.currentData(),
+            self.gas.currentData(),
+        )
 
     def _outlet_absolute(self):
         mode = self.outlet_mode.currentData()
@@ -258,6 +344,10 @@ class CalculationPage(QWidget):
                 outlet_pressure_kpa_abs=outlet_absolute,
                 flow_reference_pressure_kpa_abs=self.flow_ref.value(),
             )
+            snapshot = self._captured_snapshot
+            captured_unchanged = bool(
+                snapshot and self._captured_input_signature == self._input_signature()
+            )
             inputs = {
                 "gas": self.gas.currentData(),
                 "viscosity_upa_s": self.viscosity.value(),
@@ -284,20 +374,21 @@ class CalculationPage(QWidget):
                     "absolute_pressure": "kPa abs",
                     "flow": "L/min",
                 },
-                "data_origin": "leitura_combinada" if self._captured else "entrada_manual",
+                "data_origin": (
+                    "leitura_combinada"
+                    if captured_unchanged
+                    else "mista"
+                    if snapshot
+                    else "entrada_manual"
+                ),
                 "reading_timestamps": {
-                    "pressure": self.current_measurement.pressure.timestamp.isoformat()
-                    if self._captured
-                    and self.current_measurement
-                    and self.current_measurement.pressure.timestamp
-                    else None,
-                    "flow": self.current_measurement.flow.timestamp.isoformat()
-                    if self._captured
-                    and self.current_measurement
-                    and self.current_measurement.flow.timestamp
-                    else None,
+                    "pressure": snapshot.pressure_timestamp.isoformat() if snapshot else None,
+                    "flow": snapshot.flow_timestamp.isoformat() if snapshot else None,
                 },
-                "simulado": bool(self.current_measurement and self.current_measurement.simulated),
+                "captured_measurement": snapshot.as_dict() if snapshot else None,
+                "simulado": snapshot.simulated
+                if snapshot
+                else bool(self.current_measurement and self.current_measurement.simulated),
                 "formula": "k=2·μ·L·Qref·Pref/[A·(Pin²−Pout²)]",
             }
             self.last_permeability = (inputs, r.as_dict())
@@ -399,6 +490,8 @@ class CalculationPage(QWidget):
         self.last_klinkenberg = None
         self._dirty_results.clear()
         self._captured = False
+        self._captured_snapshot = None
+        self._captured_input_signature = None
         self.current_measurement = None
         if hasattr(self, "save_permeability"):
             self.save_permeability.setEnabled(False)

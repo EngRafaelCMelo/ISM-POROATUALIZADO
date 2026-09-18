@@ -115,10 +115,13 @@ def test_long_dataset_reduction_preserves_ends_extremes_and_closes_figures() -> 
         }
     )
     service = ChartService(max_points=300)
-    reduced = service.sensor_series(frame, "pressao")
+    complete = service.validated_sensor_series(frame, "pressao")
+    reduced = service.plot_sensor_series(frame, "pressao")
     before = set(plt.get_fignums())
     assert service.sensor_time_chart(frame, "pressao", "psi") is not None
     assert set(plt.get_fignums()) == before
+    assert len(complete) == 10_000
+    assert complete["value"].mean() == frame["pressao"].mean()
     assert len(reduced) <= 304
     assert reduced.iloc[0]["timestamp"] == frame.iloc[0]["timestamp_pressao"]
     assert reduced.iloc[-1]["timestamp"] == frame.iloc[-1]["timestamp_pressao"]

@@ -271,6 +271,10 @@ class MainWindow(QMainWindow):
         self.test_page = TestPage()
         self.calculations = CalculationPage(self.config.data)
         self.graphs = GraphsPage()
+        self.graphs.set_units(
+            str(self.config.get("sensores.pressao.unidade", "psi")),
+            str(self.config.get("sensores.vazao.unidade", "NL/min")),
+        )
         self.history = HistoryPage()
         self.calibration = CalibrationPage()
         self.settings = SettingsPage(self.config.data)
@@ -727,9 +731,10 @@ class MainWindow(QMainWindow):
             definition.simulated = self.simulating
             session = self.test_service.start(definition)
             self.graphs.reset()
+            self.graphs.set_units(definition.pressure_unit, definition.flow_unit)
             self.test_page.reset()
             self.test_page.set_session(session)
-            self.calculations.set_session(session.definition, "history")
+            self.calculations.set_session(session.definition, "active")
             self.calculation_test_id = session.id
             self.overview.reset_test()
             self.overview.set_test_active(True)
@@ -1034,6 +1039,10 @@ class MainWindow(QMainWindow):
         try:
             ConfigManager._deep_update(self.config.data, values)
             self.config.save()
+            self.graphs.set_units(
+                str(self.config.get("sensores.pressao.unidade", "psi")),
+                str(self.config.get("sensores.vazao.unidade", "NL/min")),
+            )
             QMessageBox.information(
                 self,
                 "Configurações",

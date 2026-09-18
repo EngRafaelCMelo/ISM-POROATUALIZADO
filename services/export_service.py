@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from datetime import datetime
 from functools import partial
 from pathlib import Path
@@ -96,10 +97,18 @@ class ExportService:
     def _format_result(value: Any, unit: str = "") -> str:
         if value is None:
             return "não disponível"
+        if isinstance(value, (dict, list, tuple)):
+            try:
+                return json.dumps(value, ensure_ascii=False, allow_nan=False)
+            except (TypeError, ValueError):
+                return "não disponível"
         try:
-            formatted = f"{float(value):.6g}"
+            numeric = float(value)
         except (TypeError, ValueError):
             return str(value)
+        if not math.isfinite(numeric):
+            return "não disponível"
+        formatted = f"{numeric:.6g}"
         return f"{formatted} {unit}".strip()
 
     @staticmethod
@@ -109,12 +118,14 @@ class ExportService:
             current["vazao"] = pd.NA
         for legacy in ("vazao_baixa", "vazao_alta"):
             if legacy in current:
-                current["vazao"] = current["vazao"].combine_first(current[legacy])
+                current["vazao"] = current["vazao"].where(current["vazao"].notna(), current[legacy])
         if "vazao_ma" not in current:
             current["vazao_ma"] = pd.NA
         for legacy in ("vazao_baixa_ma", "vazao_alta_ma"):
             if legacy in current:
-                current["vazao_ma"] = current["vazao_ma"].combine_first(current[legacy])
+                current["vazao_ma"] = current["vazao_ma"].where(
+                    current["vazao_ma"].notna(), current[legacy]
+                )
         legacy_columns = [
             "vazao_baixa_ma",
             "vazao_baixa",
@@ -176,13 +187,18 @@ class ExportService:
         target = self._safe_target(directory, f"{test['codigo']}.xlsx")
         summary = pd.DataFrame([dict(test)])
         measurements = self._current_measurements(measurements)
-        numeric = [c for c in ("pressao", "vazao") if c in measurements]
-        stats = measurements[numeric].describe().T.reset_index() if numeric else pd.DataFrame()
+        stats = self.measurement_statistics(measurements, test)
+        measurement_export = measurements.rename(
+            columns={
+                "pressao": f"pressao ({test['unidade_pressao'] or 'não disponível'})",
+                "vazao": f"vazao ({test['unidade_vazao'] or 'não disponível'})",
+            }
+        )
         with pd.ExcelWriter(target, engine="openpyxl") as writer:
             summary.to_excel(writer, sheet_name="Resumo", index=False)
             if not stats.empty:
                 stats.to_excel(writer, sheet_name="Resumo", index=False, startrow=4)
-            measurements.to_excel(writer, sheet_name="Medições", index=False)
+            measurement_export.to_excel(writer, sheet_name="Medições", index=False)
             alarms.to_excel(writer, sheet_name="Alarmes", index=False)
             markers.to_excel(writer, sheet_name="Marcações", index=False)
             calculations.to_excel(writer, sheet_name="Cálculos", index=False)
@@ -190,6 +206,28 @@ class ExportService:
                 writer, sheet_name="Calibração", index=False
             )
         return target
+
+    def measurement_statistics(self, measurements: pd.DataFrame, test) -> pd.DataFrame:
+        """Resumo compartilhado por PDF/XLSX, sempre sobre todos os pontos válidos."""
+        rows = []
+        for sensor, label, unit in (
+            ("pressao", "Pressão", test["unidade_pressao"] or "não disponível"),
+            ("vazao", "Vazão", test["unidade_vazao"] or "não disponível"),
+        ):
+            values = self.charts.validated_sensor_series(measurements, sensor)["value"].dropna()
+            rows.append(
+                {
+                    "Grandeza": label,
+                    "Mínimo": values.min() if not values.empty else None,
+                    "Média": values.mean() if not values.empty else None,
+                    "Mediana": values.median() if not values.empty else None,
+                    "Máximo": values.max() if not values.empty else None,
+                    "Desvio padrão": values.std(ddof=0) if not values.empty else None,
+                    "N válido": len(values),
+                    "Unidade": unit,
+                }
+            )
+        return pd.DataFrame(rows)
 
     @staticmethod
     def _styles():
@@ -387,13 +425,10 @@ class ExportService:
             ]
         ]
         for sensor, label in (("pressao", "Pressão"), ("vazao", "Vazão")):
-            column = f"{sensor}_valida"
-            valid = int(
-                pd.to_numeric(measurements.get(column, pd.Series(dtype=float)), errors="coerce")
-                .fillna(0)
-                .sum()
-            )
-            times = self.charts._timestamps(measurements, sensor).dropna().sort_values()
+            series = self.charts.validated_sensor_series(measurements, sensor)
+            valid_series = series.dropna(subset=["value"])
+            valid = len(valid_series)
+            times = valid_series["timestamp"]
             counts = self._status_counts(measurements, sensor)
             rows.append(
                 [
@@ -420,38 +455,21 @@ class ExportService:
         ]
 
     def _statistics(self, measurements, test, styles):
-        rows = [
-            [
-                "Grandeza",
-                "Mínimo",
-                "Média",
-                "Mediana",
-                "Máximo",
-                "Desvio padrão",
-                "N válido",
-                "Unidade",
-            ]
-        ]
-        for sensor, label, unit in (
-            ("pressao", "Pressão", test["unidade_pressao"] or "—"),
-            ("vazao", "Vazão", test["unidade_vazao"] or "—"),
-        ):
-            series = self.charts.sensor_series(measurements, sensor)["value"].dropna()
-            if series.empty:
-                rows.append([label, *(["não disponível"] * 5), "0", unit])
-            else:
-                rows.append(
-                    [
-                        label,
-                        f"{series.min():.5g}",
-                        f"{series.mean():.5g}",
-                        f"{series.median():.5g}",
-                        f"{series.max():.5g}",
-                        f"{series.std(ddof=0):.5g}",
-                        str(len(series)),
-                        unit,
-                    ]
-                )
+        stats = self.measurement_statistics(measurements, test)
+        rows = [list(stats.columns)]
+        for record in stats.to_dict(orient="records"):
+            rows.append(
+                [
+                    record["Grandeza"],
+                    self._format_result(record["Mínimo"]),
+                    self._format_result(record["Média"]),
+                    self._format_result(record["Mediana"]),
+                    self._format_result(record["Máximo"]),
+                    self._format_result(record["Desvio padrão"]),
+                    str(record["N válido"]),
+                    record["Unidade"],
+                ]
+            )
         return [
             Paragraph("3. Resumo estatístico", styles["Section"]),
             self._table(
@@ -499,14 +517,18 @@ class ExportService:
             ]
             if len(result_rows) == 1:
                 result_rows.append(["Resultado", "não disponível (registro legado)"])
-            input_summary = (
-                ", ".join(
-                    f"{key}={self._format_result(value)}"
-                    for key, value in inputs.items()
-                    if key not in {"points", "timestamps_leituras"}
+            input_rows = [["Entrada", "Valor"]]
+            for key, value in self._flatten_mapping(inputs):
+                if key == "points" or key.startswith("points."):
+                    continue
+                input_rows.append(
+                    [
+                        self._paragraph(key, styles["BodyText"]),
+                        self._paragraph(self._format_result(value), styles["BodyText"]),
+                    ]
                 )
-                or "não disponível"
-            )
+            if len(input_rows) == 1:
+                input_rows.append(["Entradas", "não disponível"])
             block = [
                 Paragraph(
                     f"5.{index} {escape(str(record.get('tipo') or 'Cálculo'))}",
@@ -520,7 +542,7 @@ class ExportService:
                     f"Método/fórmula: {escape(str(inputs.get('formula') or 'não disponível'))}",
                     styles["BodyText"],
                 ),
-                Paragraph(f"Entradas: {escape(input_summary)}", styles["BodyText"]),
+                self._table(input_rows, [62 * mm, 108 * mm], 7.5, 1),
                 self._table(result_rows, [72 * mm, 98 * mm], 7.5, 1),
                 Paragraph(
                     f"Observações: {escape(str(record.get('observacoes') or '—'))}",
@@ -528,8 +550,21 @@ class ExportService:
                 ),
                 Spacer(1, 3 * mm),
             ]
-            elements.append(KeepTogether(block))
+            elements.extend(block)
         return elements
+
+    @classmethod
+    def _flatten_mapping(cls, value: Any, prefix: str = "") -> list[tuple[str, Any]]:
+        rows: list[tuple[str, Any]] = []
+        if isinstance(value, dict):
+            for key, child in value.items():
+                name = f"{prefix}.{key}" if prefix else str(key)
+                rows.extend(cls._flatten_mapping(child, name))
+        elif isinstance(value, (list, tuple)):
+            rows.append((prefix, f"{len(value)} item(ns)"))
+        else:
+            rows.append((prefix, value))
+        return rows
 
     def _events(self, alarms, markers, styles):
         elements = [Paragraph("7. Alarmes", styles["Section"])]

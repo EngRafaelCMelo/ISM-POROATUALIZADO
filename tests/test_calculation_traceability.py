@@ -40,10 +40,11 @@ def test_permeability_inputs_are_complete_and_persisted(qt_application, tmp_path
                 timestamp=timestamp,
             ),
             simulated=True,
+            communication_state="OK",
         )
     )
-    page._capture()
     page.outlet_mode.setCurrentIndex(page.outlet_mode.findData("atmosphere"))
+    page._capture()
     page._calculate()
     pending = page.pending_results()
     assert len(pending) == 1

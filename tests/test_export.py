@@ -73,7 +73,7 @@ def test_export_xlsx_json_and_pdf(tmp_path) -> None:
         pd.ExcelFile(xlsx).sheet_names
     )
     measurement_columns = pd.read_excel(xlsx, sheet_name="Medições").columns
-    assert "vazao" in measurement_columns
+    assert "vazao (NL/min)" in measurement_columns
     assert "vazao_alta" not in measurement_columns
 
 

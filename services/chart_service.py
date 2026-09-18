@@ -42,9 +42,15 @@ class ChartImage:
 class ChartService:
     """Constrói PNGs sem depender de widgets ou de uma sessão Qt ativa."""
 
-    def __init__(self, max_points: int = 2500, dpi: int = 160):
+    def __init__(
+        self,
+        max_points: int = 2500,
+        dpi: int = 160,
+        sync_tolerance_seconds: float = 1.05,
+    ):
         self.max_points = max(50, max_points)
         self.dpi = max(100, dpi)
+        self.sync_tolerance_seconds = max(0.0, sync_tolerance_seconds)
 
     @staticmethod
     def _frame(records: pd.DataFrame | Iterable[dict[str, Any]]) -> pd.DataFrame:
@@ -82,10 +88,10 @@ class ChartService:
             return pd.Series(pd.NaT, index=frame.index, dtype="datetime64[ns]")
         return pd.to_datetime(frame[column], errors="coerce")
 
-    def sensor_series(
+    def validated_sensor_series(
         self, records: pd.DataFrame | Iterable[dict[str, Any]], sensor: str
     ) -> pd.DataFrame:
-        """Retorna timestamps reais e NaN explícito nas leituras inválidas."""
+        """Retorna a série integral; inválidos permanecem como lacunas NaN."""
         frame = self._frame(records)
         value_column = "pressao" if sensor == "pressao" else "vazao"
         if frame.empty or value_column not in frame:
@@ -103,7 +109,23 @@ class ChartService:
             .sort_values("timestamp", kind="stable")
             .reset_index(drop=True)
         )
-        return self._reduce(result)
+        return result
+
+    def plot_sensor_series(
+        self, records: pd.DataFrame | Iterable[dict[str, Any]], sensor: str
+    ) -> pd.DataFrame:
+        """Retorna somente a representação reduzida usada para renderização."""
+        return self._reduce(self.validated_sensor_series(records, sensor))
+
+    def sensor_series(
+        self, records: pd.DataFrame | Iterable[dict[str, Any]], sensor: str
+    ) -> pd.DataFrame:
+        """Compatibilidade: seleção validada sempre significa a série integral."""
+        return self.validated_sensor_series(records, sensor)
+
+    @staticmethod
+    def valid_values(records: pd.DataFrame | Iterable[dict[str, Any]], sensor: str) -> pd.Series:
+        return ChartService().validated_sensor_series(records, sensor)["value"].dropna()
 
     def combined_pairs(self, records: pd.DataFrame | Iterable[dict[str, Any]]) -> pd.DataFrame:
         """Seleciona somente pares persistidos, válidos e sincronizados."""
@@ -111,17 +133,49 @@ class ChartService:
         required = {"pressao", "vazao"}
         if frame.empty or not required.issubset(frame.columns):
             return pd.DataFrame(columns=["timestamp", "pressure", "flow"])
-        pressure_ts = self._timestamps(frame, "pressao")
-        flow_ts = self._timestamps(frame, "vazao")
+        pressure_ts = (
+            pd.to_datetime(frame["timestamp_pressao"], errors="coerce")
+            if "timestamp_pressao" in frame
+            else pd.Series(pd.NaT, index=frame.index, dtype="datetime64[ns]")
+        )
+        flow_ts = (
+            pd.to_datetime(frame["timestamp_vazao"], errors="coerce")
+            if "timestamp_vazao" in frame
+            else pd.Series(pd.NaT, index=frame.index, dtype="datetime64[ns]")
+        )
         pressure = pd.to_numeric(frame["pressao"], errors="coerce")
         flow = pd.to_numeric(frame["vazao"], errors="coerce")
         valid = self._valid_mask(frame, "pressao") & self._valid_mask(frame, "vazao")
         valid &= np.isfinite(pressure) & np.isfinite(flow)
-        # Um registro combinado do AcquisitionService é sincronizado apenas quando
-        # seu estado geral é OK e ambos os timestamps existem.
+        states = (
+            frame["estado_comunicacao"].fillna("").astype(str).str.upper()
+            if "estado_comunicacao" in frame
+            else pd.Series("", index=frame.index)
+        )
+        schema = (
+            pd.to_numeric(frame["versao_schema"], errors="coerce")
+            if "versao_schema" in frame
+            else pd.Series(float("nan"), index=frame.index)
+        )
+        legacy = schema.eq(0) | states.isin({"CONECTADO", "CONNECTED", "LEGACY_OK"})
+        computer_ts = (
+            pd.to_datetime(frame["timestamp_computador"], errors="coerce")
+            if "timestamp_computador" in frame
+            else pd.Series(pd.NaT, index=frame.index, dtype="datetime64[ns]")
+        )
+        # Bancos antigos podem ter apenas timestamp_computador. O fallback é
+        # permitido exclusivamente para registros identificados como legados.
+        pressure_ts = pressure_ts.where(pressure_ts.notna(), computer_ts.where(legacy))
+        flow_ts = flow_ts.where(flow_ts.notna(), computer_ts.where(legacy))
         if "estado_comunicacao" in frame:
-            valid &= frame["estado_comunicacao"].fillna("").astype(str).str.upper().eq("OK")
+            valid &= states.eq("OK") | (
+                legacy & states.isin({"CONECTADO", "CONNECTED", "LEGACY_OK", ""})
+            )
+        else:
+            valid &= legacy
         valid &= pressure_ts.notna() & flow_ts.notna()
+        deltas = (pressure_ts - flow_ts).abs().dt.total_seconds()
+        valid &= deltas.le(self.sync_tolerance_seconds)
         result = pd.DataFrame(
             {
                 "timestamp": pd.concat([pressure_ts, flow_ts], axis=1).max(axis=1),
@@ -129,7 +183,7 @@ class ChartService:
                 "flow": flow,
             }
         )[valid]
-        return self._reduce(result.sort_values("timestamp", kind="stable").reset_index(drop=True))
+        return result.sort_values("timestamp", kind="stable").reset_index(drop=True)
 
     def _reduce(self, frame: pd.DataFrame) -> pd.DataFrame:
         """Reduz séries longas preservando início, fim, lacunas e extremos por bloco."""
@@ -175,6 +229,27 @@ class ChartService:
         records.sort(key=lambda item: str(item.get("timestamp") or ""))
         return records
 
+    @classmethod
+    def klinkenberg_points(cls, record: dict[str, Any]) -> list[tuple[float, float]]:
+        """Lê pontos atuais/legados sem avaliar divisões inválidas antecipadamente."""
+        result = record.get("results") or {}
+        inputs = record.get("inputs") or {}
+        raw_points = result.get("points_used") or inputs.get("points") or []
+        parsed: list[tuple[float, float]] = []
+        for point in raw_points:
+            if not isinstance(point, dict):
+                continue
+            inverse = point.get("inverse_pressure_kpa")
+            if not cls._finite_positive(inverse):
+                pressure = point.get("mean_pressure_kpa_abs", point.get("Pm"))
+                if not cls._finite_positive(pressure):
+                    continue
+                inverse = 1.0 / float(pressure)
+            permeability = point.get("permeability_md")
+            if cls._finite_positive(permeability):
+                parsed.append((float(inverse), float(permeability)))
+        return parsed
+
     def _new_figure(self, title: str):
         fig, ax = plt.subplots(figsize=(7.2, 3.55), constrained_layout=True)
         fig.patch.set_facecolor("white")
@@ -201,7 +276,7 @@ class ChartService:
 
     def sensor_time_chart(self, records, sensor: str, unit: str) -> ChartImage | None:
         names = {"pressao": "Pressão × tempo", "vazao": "Vazão × tempo"}
-        series = self.sensor_series(records, sensor)
+        series = self.plot_sensor_series(records, sensor)
         if not self._has_data(series):
             return None
         title = names[sensor]
@@ -215,8 +290,8 @@ class ChartService:
         return self._finish(fig, f"{sensor}_tempo", title)
 
     def combined_time_chart(self, records, pressure_unit: str, flow_unit: str) -> ChartImage | None:
-        pressure = self.sensor_series(records, "pressao")
-        flow = self.sensor_series(records, "vazao")
+        pressure = self.plot_sensor_series(records, "pressao")
+        flow = self.plot_sensor_series(records, "vazao")
         if not self._has_data(pressure) or not self._has_data(flow):
             return None
         title = "Pressão e vazão × tempo"
@@ -237,7 +312,7 @@ class ChartService:
         return self._finish(fig, "pressao_vazao_tempo", title)
 
     def flow_pressure_chart(self, records, pressure_unit: str, flow_unit: str) -> ChartImage | None:
-        pairs = self.combined_pairs(records)
+        pairs = self._reduce(self.combined_pairs(records))
         if len(pairs) < 2:
             return None
         title = "Vazão × pressão"
@@ -301,35 +376,28 @@ class ChartService:
         ]
         if not records:
             return None
-        record = records[-1]
-        result, inputs = record["results"], record["inputs"]
-        raw_points = result.get("points_used") or inputs.get("points") or []
-        points = []
-        for point in raw_points:
-            if isinstance(point, dict):
-                pressure = point.get("mean_pressure_kpa_abs", point.get("Pm"))
-                permeability = point.get("permeability_md")
-            else:
-                try:
-                    pressure, permeability = point
-                except (TypeError, ValueError):
-                    continue
-            if self._finite_positive(pressure) and self._finite_positive(permeability):
-                points.append((float(pressure), float(permeability)))
-        intercept = result.get("intrinsic_permeability_md", result.get("k_infinity_md"))
-        slope = result.get("slope_md_kpa")
-        if len(points) < 2 or not self._finite(intercept) or not self._finite(slope):
+        selected = None
+        for record in reversed(records):
+            result = record["results"]
+            inverse_points = self.klinkenberg_points(record)
+            intercept = result.get("intrinsic_permeability_md", result.get("k_infinity_md"))
+            slope = result.get("slope_md_kpa")
+            if len(inverse_points) >= 2 and self._finite(intercept) and self._finite(slope):
+                selected = (result, inverse_points, float(intercept), float(slope))
+                break
+        if selected is None:
             return None
-        xs = np.array([1.0 / p for p, _ in points])
-        ys = np.array([k for _, k in points])
+        result, inverse_points, intercept, slope = selected
+        xs = np.array([inverse for inverse, _ in inverse_points])
+        ys = np.array([permeability for _, permeability in inverse_points])
         fit_x = np.linspace(xs.min(), xs.max(), 100)
-        fit_y = float(intercept) + float(slope) * fit_x
+        fit_y = intercept + slope * fit_x
         r2 = result.get("r_squared")
         slip = result.get("slip_factor_kpa")
         title = "Klinkenberg: permeabilidade × 1/Pm"
         fig, ax = self._new_figure(title)
         ax.scatter(xs, ys, color=COLORS["pressure"], label="Pontos experimentais", zorder=3)
-        label = f"Ajuste: k∞={float(intercept):.5g} mD"
+        label = f"Ajuste: k∞={intercept:.5g} mD"
         if self._finite(slip):
             label += f"; b={float(slip):.5g} kPa"
         if self._finite(r2):
