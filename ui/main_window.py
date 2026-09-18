@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import pyqtgraph as pg
+from pyqtgraph.exporters import ImageExporter
 from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QCloseEvent, QIcon, QPixmap
 from PySide6.QtWidgets import (
@@ -91,6 +92,7 @@ class MainWindow(QMainWindow):
         self.flow_connected = False
         self.simulating = False
         self.export_workers: set[ExportWorker] = set()
+        self.exporting_test_ids: set[int] = set()
         self.message_times: deque[datetime] = deque(maxlen=20)
         self.calculation_test_id: int | None = None
 
@@ -593,6 +595,7 @@ class MainWindow(QMainWindow):
     def _on_measurement(self, measurement: Measurement) -> None:
         self._last_firmware_version = measurement.firmware_version
         self.calculations.update_measurement(measurement)
+        self.graphs.add_combined_measurement(measurement)
         self.diagnostics.raw.setPlainText(measurement.raw_message)
         self.diagnostics.values["ma_pressure"].setText(
             self._format_ma(measurement.pressure.current_ma)
@@ -726,7 +729,7 @@ class MainWindow(QMainWindow):
             self.graphs.reset()
             self.test_page.reset()
             self.test_page.set_session(session)
-            self.calculations.set_session(session.definition)
+            self.calculations.set_session(session.definition, "history")
             self.calculation_test_id = session.id
             self.overview.reset_test()
             self.overview.set_test_active(True)
@@ -763,19 +766,40 @@ class MainWindow(QMainWindow):
         if not accepted:
             return
         try:
+            pending = self.calculations.pending_results()
+            if pending:
+                save_response = QMessageBox.question(
+                    self,
+                    "Resultados não salvos",
+                    "Há resultados de permeabilidade calculados e ainda não salvos. "
+                    "Deseja salvá-los antes de gerar o relatório?",
+                    QMessageBox.StandardButton.Yes
+                    | QMessageBox.StandardButton.No
+                    | QMessageBox.StandardButton.Cancel,
+                    QMessageBox.StandardButton.Yes,
+                )
+                if save_response == QMessageBox.StandardButton.Cancel:
+                    return
+                if save_response == QMessageBox.StandardButton.Yes:
+                    test_id = self.test_service.current.id
+                    for kind, inputs, results, observations in pending:
+                        self.calculation_repository.save(
+                            test_id, kind, inputs, results, observations
+                        )
+                        self.calculations.mark_saved(kind)
             session = self.test_service.finish(note)
             self.overview.set_test_active(False)
             self.current_test_label.setText("Nenhum ensaio ativo")
             self.calculation_test_id = session.id
-            self.calculations.set_session(session.definition)
+            self.calculations.set_session(session.definition, "history")
             self._refresh_history()
             report_directory = Path(session.definition.export_directory or self.paths.exports)
-            self.export_service.export_pdf(session.id, report_directory)
-            self.overview.set_report_ready(True)
+            self._start_report_export(session.id, report_directory)
             QMessageBox.information(
                 self,
                 "Ensaio finalizado",
-                f"Ensaio {session.definition.code} salvo com {session.sample_count} amostras.",
+                f"Ensaio {session.definition.code} salvo com {session.sample_count} amostras.\n\n"
+                "Gerando relatório… Você pode continuar usando o aplicativo.",
             )
         except Exception as exc:
             logger.exception("Falha ao finalizar ensaio")
@@ -818,10 +842,21 @@ class MainWindow(QMainWindow):
         )
         definition = self._definition_from_record(row)
         self.calculation_test_id = test_id
-        self.calculations.set_session(definition)
+        self.calculations.set_session(definition, "history")
         self._refresh_calculation_history()
-        self._navigate(2)
-        self.nav_by_page[2].setChecked(True)
+        calculations = self.calculation_repository.list(test_id)
+        self.graphs.load_history(
+            test_id,
+            measurements,
+            calculations,
+            row["unidade_pressao"] or "psi",
+            row["unidade_vazao"] or "NL/min",
+        )
+        self._navigate(3)
+        self.nav_by_page[3].setChecked(True)
+        self.statusBar().showMessage(
+            f"Ensaio histórico {row['codigo']} aberto em modo somente leitura", 6000
+        )
 
     @staticmethod
     def _definition_from_record(row) -> object:
@@ -856,18 +891,26 @@ class MainWindow(QMainWindow):
     def _save_calculation(
         self, calculation_type: str, inputs: dict, results: dict, notes: str
     ) -> None:
-        if self.calculation_test_id is None:
+        if (
+            self.calculation_test_id is None
+            or not self.test_service.current
+            or self.test_service.current.id != self.calculation_test_id
+        ):
             QMessageBox.warning(
                 self,
                 "Salvar cálculo",
-                "Inicie um ensaio ou abra um ensaio do histórico antes de salvar.",
+                "Somente o ensaio ativo pode receber novos cálculos. Ensaios históricos são somente leitura.",
             )
             return
         try:
             self.calculation_repository.save(
                 self.calculation_test_id, calculation_type, inputs, results, notes
             )
+            self.calculations.mark_saved(calculation_type)
             self._refresh_calculation_history()
+            self.graphs.load_calculations(
+                self.calculation_repository.list(self.calculation_test_id)
+            )
             QMessageBox.information(self, "Cálculos", "Resultado salvo no ensaio.")
         except Exception as exc:
             logger.exception("Falha ao salvar cálculo")
@@ -904,8 +947,14 @@ class MainWindow(QMainWindow):
             if format_name == "csv"
             else (test_id, Path(directory))
         )
+        if test_id in self.exporting_test_ids:
+            QMessageBox.information(
+                self, "Exportação em andamento", "Este ensaio já está sendo exportado."
+            )
+            return
         worker = ExportWorker(method, args)
         self.export_workers.add(worker)
+        self.exporting_test_ids.add(test_id)
         worker.completed.connect(
             lambda target: QMessageBox.information(
                 self, "Exportação concluída", f"Arquivo salvo em:\n{target}"
@@ -915,6 +964,7 @@ class MainWindow(QMainWindow):
             lambda error: QMessageBox.critical(self, "Falha na exportação", error)
         )
         worker.finished.connect(lambda: self.export_workers.discard(worker))
+        worker.finished.connect(lambda: self.exporting_test_ids.discard(test_id))
         worker.finished.connect(worker.deleteLater)
         worker.start()
         self.statusBar().showMessage("Exportação em andamento…", 3000)
@@ -992,13 +1042,56 @@ class MainWindow(QMainWindow):
         except (ValueError, OSError) as exc:
             QMessageBox.critical(self, "Configurações inválidas", str(exc))
 
-    def _export_graph_png(self) -> None:
-        filename, _ = QFileDialog.getSaveFileName(
-            self, "Exportar gráficos", str(self.paths.exports / "graficos.png"), "PNG (*.png)"
-        )
-        if filename:
-            self.graphs.graphics.grab().save(filename)
+    def _export_graph_png(self, mode: str = "individual") -> None:
+        items = self.graphs.export_items(mode)
+        if mode == "individual":
+            name, item = items[0]
+            filename, _ = QFileDialog.getSaveFileName(
+                self, "Exportar gráfico", str(self.paths.exports / f"{name}.png"), "PNG (*.png)"
+            )
+            if not filename:
+                return
+            ImageExporter(item).export(filename)
             self.statusBar().showMessage(f"Gráfico salvo em {filename}", 4000)
+            return
+        directory = QFileDialog.getExistingDirectory(
+            self, "Exportar todos os gráficos", str(self.paths.exports)
+        )
+        if not directory:
+            return
+        for name, item in items:
+            ImageExporter(item).export(str(Path(directory) / f"{name}.png"))
+        self.statusBar().showMessage(f"Gráficos salvos em {directory}", 4000)
+
+    def _start_report_export(self, test_id: int, directory: Path) -> None:
+        if test_id in self.exporting_test_ids:
+            return
+        worker = ExportWorker(self.export_service.export_pdf, (test_id, directory))
+        self.export_workers.add(worker)
+        self.exporting_test_ids.add(test_id)
+
+        def completed(target: str) -> None:
+            self.overview.set_report_ready(True)
+            self.statusBar().showMessage(f"Relatório salvo em {target}", 8000)
+            QMessageBox.information(self, "Relatório concluído", f"Relatório salvo em:\n{target}")
+
+        def failed(error: str) -> None:
+            self.overview.set_report_ready(False)
+            logger.error("Falha ao gerar relatório do ensaio %s: %s", test_id, error)
+            QMessageBox.critical(
+                self,
+                "Falha no relatório",
+                "O ensaio foi finalizado e permanece salvo. O PDF pode ser gerado "
+                f"novamente pelo histórico.\n\nDetalhes: {error}",
+            )
+
+        worker.completed.connect(completed)
+        worker.failed.connect(failed)
+        worker.finished.connect(lambda: self.export_workers.discard(worker))
+        worker.finished.connect(lambda: self.exporting_test_ids.discard(test_id))
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+        self.statusBar().showMessage("Gerando relatório…")
 
     def _copy_diagnostics(self) -> None:
         QApplication.clipboard().setText(self.diagnostics.report_text())

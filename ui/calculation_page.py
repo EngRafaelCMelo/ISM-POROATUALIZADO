@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from datetime import datetime
 from typing import Any
 
@@ -56,6 +57,8 @@ class CalculationPage(QWidget):
         self.last_permeability = None
         self.last_klinkenberg = None
         self._dirty_results = set()
+        self._read_only = False
+        self._captured = False
         root = QVBoxLayout(self)
         title = QLabel("Permeabilidade")
         title.setObjectName("pageTitle")
@@ -186,9 +189,14 @@ class CalculationPage(QWidget):
         self.viscosity.setValue(float(GAS_PROPERTIES[self.gas.currentData()]["viscosidade_upa_s"]))
 
     def set_session(self, definition: TestDefinition | None, context="active"):
+        changed = not self.definition or not definition or self.definition.code != definition.code
         self.definition = definition
+        self._read_only = context != "active"
+        if changed:
+            self.clear_pending_results()
         self.banner.setText(
             f"Ensaio: {definition.code} — {definition.sample_name}"
+            + (" · HISTÓRICO — SOMENTE LEITURA" if self._read_only else "")
             if definition
             else "Nenhum ensaio selecionado"
         )
@@ -201,6 +209,8 @@ class CalculationPage(QWidget):
                 max(0, self.reference.findData(definition.pressure_reference))
             )
             self.gas.setCurrentIndex(max(0, self.gas.findData(definition.gas_type)))
+        for widget in (self.save_permeability, self.save_klinkenberg):
+            widget.setEnabled(False)
 
     def update_measurement(self, m: Measurement):
         self.current_measurement = m
@@ -217,6 +227,7 @@ class CalculationPage(QWidget):
             self.inlet.setValue(self.current_measurement.pressure.value)
         if self.current_measurement.flow.value is not None:
             self.flow.setValue(self.current_measurement.flow.value)
+        self._captured = True
 
     def _outlet_absolute(self):
         mode = self.outlet_mode.currentData()
@@ -231,31 +242,67 @@ class CalculationPage(QWidget):
 
     def _calculate(self):
         try:
+            inlet_absolute = absolute_pressure_kpa(
+                self.inlet.value(),
+                self.unit.currentText(),
+                self.reference.currentData(),
+                self.atmospheric.value(),
+            )
+            outlet_absolute = self._outlet_absolute()
             r = calculate_gas_permeability(
                 flow_l_min=self.flow.value(),
                 viscosity_upa_s=self.viscosity.value(),
                 length_mm=self.length.value(),
                 diameter_mm=self.diameter.value(),
-                inlet_pressure_kpa_abs=absolute_pressure_kpa(
-                    self.inlet.value(),
-                    self.unit.currentText(),
-                    self.reference.currentData(),
-                    self.atmospheric.value(),
-                ),
-                outlet_pressure_kpa_abs=self._outlet_absolute(),
+                inlet_pressure_kpa_abs=inlet_absolute,
+                outlet_pressure_kpa_abs=outlet_absolute,
                 flow_reference_pressure_kpa_abs=self.flow_ref.value(),
             )
             inputs = {
                 "gas": self.gas.currentData(),
+                "viscosity_upa_s": self.viscosity.value(),
                 "temperatura_c": self.temperature.value(),
                 "comprimento_mm": self.length.value(),
                 "diametro_mm": self.diameter.value(),
+                "cross_section_area_m2": math.pi * (self.diameter.value() / 1000) ** 2 / 4,
+                "inlet_pressure_entered": self.inlet.value(),
+                "inlet_pressure_kpa_abs": inlet_absolute,
+                "outlet_pressure_entered": self.outlet.value(),
+                "outlet_pressure_kpa_abs": outlet_absolute,
                 "modo_pressao_saida": self.outlet_mode.currentData(),
+                "atmospheric_pressure_kpa": self.atmospheric.value(),
+                "pressure_reference": self.reference.currentData(),
+                "flow_l_min": self.flow.value(),
+                "flow_reference_pressure_kpa_abs": self.flow_ref.value(),
+                "units": {
+                    "temperature": "°C",
+                    "viscosity": "µPa·s",
+                    "length": "mm",
+                    "diameter": "mm",
+                    "area": "m²",
+                    "pressure_entered": self.unit.currentText(),
+                    "absolute_pressure": "kPa abs",
+                    "flow": "L/min",
+                },
+                "data_origin": "leitura_combinada" if self._captured else "entrada_manual",
+                "reading_timestamps": {
+                    "pressure": self.current_measurement.pressure.timestamp.isoformat()
+                    if self._captured
+                    and self.current_measurement
+                    and self.current_measurement.pressure.timestamp
+                    else None,
+                    "flow": self.current_measurement.flow.timestamp.isoformat()
+                    if self._captured
+                    and self.current_measurement
+                    and self.current_measurement.flow.timestamp
+                    else None,
+                },
                 "simulado": bool(self.current_measurement and self.current_measurement.simulated),
+                "formula": "k=2·μ·L·Qref·Pref/[A·(Pin²−Pout²)]",
             }
             self.last_permeability = (inputs, r.as_dict())
             self._dirty_results.add("Permeabilidade a gás")
-            self.save_permeability.setEnabled(self.definition is not None)
+            self.save_permeability.setEnabled(self.definition is not None and not self._read_only)
             self._rows(
                 self.result,
                 [
@@ -278,15 +325,35 @@ class CalculationPage(QWidget):
 
     def _klinkenberg(self):
         try:
-            r = calculate_klinkenberg(
-                [
-                    (float(self.points.item(i, 0).text()), float(self.points.item(i, 1).text()))
-                    for i in range(self.points.rowCount())
-                ]
+            points = [
+                (float(self.points.item(i, 0).text()), float(self.points.item(i, 1).text()))
+                for i in range(self.points.rowCount())
+            ]
+            r = calculate_klinkenberg(points)
+            self.last_klinkenberg = (
+                {
+                    "points": [
+                        {
+                            "mean_pressure_kpa_abs": pressure,
+                            "inverse_pressure_kpa": 1 / pressure,
+                            "permeability_md": permeability,
+                        }
+                        for pressure, permeability in points
+                    ],
+                    "units": {
+                        "mean_pressure": "kPa abs",
+                        "inverse_pressure": "1/kPa",
+                        "permeability": "mD",
+                    },
+                    "formula": "k_aparente = k∞ + inclinação·(1/Pm)",
+                    "simulado": bool(
+                        self.current_measurement and self.current_measurement.simulated
+                    ),
+                },
+                r.as_dict(),
             )
-            self.last_klinkenberg = ({}, r.as_dict())
             self._dirty_results.add("Klinkenberg")
-            self.save_klinkenberg.setEnabled(self.definition is not None)
+            self.save_klinkenberg.setEnabled(self.definition is not None and not self._read_only)
             self._rows(
                 self.kresult,
                 [
@@ -326,6 +393,20 @@ class CalculationPage(QWidget):
         (
             self.save_permeability if kind == "Permeabilidade a gás" else self.save_klinkenberg
         ).setEnabled(False)
+
+    def clear_pending_results(self):
+        self.last_permeability = None
+        self.last_klinkenberg = None
+        self._dirty_results.clear()
+        self._captured = False
+        self.current_measurement = None
+        if hasattr(self, "save_permeability"):
+            self.save_permeability.setEnabled(False)
+            self.save_klinkenberg.setEnabled(False)
+        if hasattr(self, "result"):
+            self.result.setRowCount(0)
+            self.kresult.setRowCount(0)
+            self.points.setRowCount(0)
 
     def populate_history(self, rows):
         self.history.setRowCount(0)

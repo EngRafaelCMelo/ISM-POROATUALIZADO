@@ -103,8 +103,14 @@ class KlinkenbergResult:
     r_squared: float
     points: int
 
-    def as_dict(self) -> dict[str, float | int]:
-        return asdict(self)
+    points_used: tuple[dict[str, float], ...] = ()
+
+    def as_dict(self) -> dict[str, object]:
+        result = asdict(self)
+        result["intercept_md"] = self.intrinsic_permeability_md
+        result["k_infinity_md"] = self.intrinsic_permeability_md
+        result["point_count"] = self.points
+        return result
 
 
 def calculate_klinkenberg(points: Iterable[tuple[float, float]]) -> KlinkenbergResult:
@@ -124,6 +130,20 @@ def calculate_klinkenberg(points: Iterable[tuple[float, float]]) -> KlinkenbergR
         raise ValueError("O ajuste resultou em permeabilidade intrínseca não positiva")
     total = sum((y - ym) ** 2 for y in ys)
     residual = sum((y - (intercept + slope * x)) ** 2 for x, y in zip(xs, ys))
+    used = tuple(
+        {
+            "mean_pressure_kpa_abs": pressure,
+            "Pm": pressure,
+            "inverse_pressure_kpa": 1 / pressure,
+            "permeability_md": permeability,
+        }
+        for pressure, permeability in values
+    )
     return KlinkenbergResult(
-        intercept, slope / intercept, slope, 1 - residual / total if total else 1.0, len(values)
+        intercept,
+        slope / intercept,
+        slope,
+        1 - residual / total if total else 1.0,
+        len(values),
+        used,
     )

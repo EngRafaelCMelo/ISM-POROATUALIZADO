@@ -171,6 +171,8 @@ class AcquisitionService(QObject):
         if flow.quality == ReadingQuality.STALE:
             self.sensor_status_changed.emit("vazao", "STALE")
         state = self._combined_state(pressure, flow)
+        if state == "OK" and not self._timestamps_synchronized(pressure, flow):
+            state = "UNSYNCHRONIZED"
         measurement = Measurement(
             received_at=now,
             device_timestamp_ms=meta.device_timestamp_ms if meta else None,
@@ -204,6 +206,12 @@ class AcquisitionService(QObject):
 
     def _flow_stale_after(self) -> float:
         return float(self.config["flowmeter"].get("stale_after_s", 3.0))
+
+    def _timestamps_synchronized(self, pressure: SensorReading, flow: SensorReading) -> bool:
+        if pressure.timestamp is None or flow.timestamp is None:
+            return False
+        window = max(0.1, float(self.config["aquisicao"].get("intervalo_s", 1.0)))
+        return abs((pressure.timestamp - flow.timestamp).total_seconds()) <= window + 0.05
 
     @staticmethod
     def _combined_state(pressure: SensorReading, flow: SensorReading) -> str:

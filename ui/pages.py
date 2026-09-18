@@ -295,13 +295,21 @@ class OverviewPage(QWidget):
 
 
 class GraphsPage(QWidget):
-    export_requested = Signal()
+    export_requested = Signal(str)
 
     def __init__(self):
         super().__init__()
+        self.pressure_unit = "psi"
+        self.flow_unit = "NL/min"
+        self._first: datetime | None = None
+        self._historical_test_id: int | None = None
+        self._initialize_data()
+
         layout = QVBoxLayout(self)
         layout.addLayout(
-            page_header("Gráficos", "Aquisição em tempo real; zoom e deslocamento disponíveis")
+            page_header(
+                "Gráficos", "Processo e permeabilidade; zoom, pan e restauração disponíveis"
+            )
         )
         toolbar = QHBoxLayout()
         self.window_combo = QComboBox()
@@ -309,22 +317,91 @@ class GraphsPage(QWidget):
         self.visual_pause = QCheckBox("Pausar visualização")
         self.auto_zoom = QCheckBox("Zoom automático")
         self.auto_zoom.setChecked(True)
-        export = QPushButton("Exportar PNG")
-        export.clicked.connect(self.export_requested)
-        toolbar.addWidget(QLabel("Janela:"))
-        toolbar.addWidget(self.window_combo)
-        toolbar.addWidget(self.visual_pause)
-        toolbar.addWidget(self.auto_zoom)
+        self.export_graph_combo = QComboBox()
+        for title, group, index in (
+            ("Pressão × tempo", "process", 0),
+            ("Vazão × tempo", "process", 1),
+            ("Pressão e vazão × tempo", "process", 2),
+            ("Corrente do transdutor", "process", 3),
+            ("Vazão × pressão", "process", 4),
+            ("Qualidade da aquisição", "process", 5),
+            ("Permeabilidade × tempo", "permeability", 0),
+            ("Permeabilidade × pressão", "permeability", 1),
+            ("Klinkenberg", "permeability", 2),
+        ):
+            self.export_graph_combo.addItem(title, (group, index))
+        restore = QPushButton("Restaurar enquadramento")
+        restore.clicked.connect(self.restore_view)
+        export_current = QPushButton("Exportar gráfico")
+        export_current.clicked.connect(lambda: self.export_requested.emit("individual"))
+        export_all = QPushButton("Exportar todos")
+        export_all.clicked.connect(lambda: self.export_requested.emit("all"))
+        for widget in (
+            QLabel("Janela:"),
+            self.window_combo,
+            self.visual_pause,
+            self.auto_zoom,
+            restore,
+        ):
+            toolbar.addWidget(widget)
         toolbar.addStretch()
-        toolbar.addWidget(export)
+        toolbar.addWidget(self.export_graph_combo)
+        toolbar.addWidget(export_current)
+        toolbar.addWidget(export_all)
         layout.addLayout(toolbar)
+
+        self.tabs = QTabWidget()
+        self.process_page = QWidget()
+        process_layout = QVBoxLayout(self.process_page)
         self.graphics = pg.GraphicsLayoutWidget()
         self.graphics.setBackground("w")
-        layout.addWidget(self.graphics)
+        process_layout.addWidget(self.graphics)
+        self.tabs.addTab(self.process_page, "Processo")
+
+        self.permeability_page = QWidget()
+        permeability_layout = QVBoxLayout(self.permeability_page)
+        self.permeability_message = QLabel(
+            "Nenhum cálculo de permeabilidade salvo para este ensaio."
+        )
+        self.permeability_message.setObjectName("muted")
+        self.permeability_message.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        permeability_layout.addWidget(self.permeability_message)
+        self.permeability_graphics = pg.GraphicsLayoutWidget()
+        self.permeability_graphics.setBackground("w")
+        permeability_layout.addWidget(self.permeability_graphics, 1)
+        self.tabs.addTab(self.permeability_page, "Permeabilidade")
+        layout.addWidget(self.tabs)
+        self._build_process_plots()
+        self._build_permeability_plots()
+
+    def _initialize_data(self):
+        for name in (
+            "pressure_times",
+            "flow_times",
+            "pressure",
+            "flow",
+            "ma_p",
+            "flow_pressure_x",
+            "flow_pressure_y",
+            "quality_times",
+            "pressure_quality",
+            "flow_quality",
+            "permeability_times",
+            "permeability_values",
+            "permeability_pressures",
+            "permeability_pressure_values",
+            "klinkenberg_x",
+            "klinkenberg_y",
+        ):
+            setattr(self, name, [])
+        self.klinkenberg_fit_x: list[float] = []
+        self.klinkenberg_fit_y: list[float] = []
+
+    def _build_process_plots(self):
         titles = [
             "Pressão × tempo",
             "Vazão × tempo",
-            "Pressão e vazão",
+            "Pressão e vazão × tempo",
             "Corrente do transdutor",
             "Vazão × pressão",
             "Qualidade da aquisição",
@@ -336,6 +413,14 @@ class GraphsPage(QWidget):
             plot.addLegend(offset=(5, 5))
             plot.setClipToView(True)
             self.plots.append(plot)
+        self.plots[0].setLabel("left", "Pressão", units=self.pressure_unit)
+        self.plots[1].setLabel("left", "Vazão", units=self.flow_unit)
+        self.plots[2].setLabel(
+            "left", "Pressão", units=self.pressure_unit, color=COLORS["pressure"]
+        )
+        self.plots[4].setLabel("bottom", "Pressão", units=self.pressure_unit)
+        self.plots[4].setLabel("left", "Vazão", units=self.flow_unit)
+        self.plots[5].setLabel("left", "Qualidade (3=OK, 2=WARNING, 1=STALE, 0=INV./DESC.)")
         self.curves = {
             "pressure": self.plots[0].plot(
                 pen=pg.mkPen(COLORS["pressure"], width=2), name="Pressão"
@@ -344,41 +429,90 @@ class GraphsPage(QWidget):
             "combined_p": self.plots[2].plot(
                 pen=pg.mkPen(COLORS["pressure"], width=2), name="Pressão"
             ),
-            "combined_f": self.plots[2].plot(pen=pg.mkPen(COLORS["flow"], width=2), name="Vazão"),
             "ma_p": self.plots[3].plot(pen=pg.mkPen(COLORS["pressure"]), name="Pressão"),
             "flow_pressure": self.plots[4].plot(
-                pen=pg.mkPen(COLORS["accent"], width=2), symbol="o", symbolSize=3, name="Vazão"
+                pen=pg.mkPen(COLORS["accent"], width=2),
+                symbol="o",
+                symbolSize=3,
+                name="Pares sincronizados",
             ),
+            "quality_p": self.plots[5].plot(
+                pen=pg.mkPen(COLORS["pressure"], width=2), name="Pressão"
+            ),
+            "quality_f": self.plots[5].plot(pen=pg.mkPen(COLORS["flow"], width=2), name="Vazão"),
         }
+        # Eixo Y direito independente para vazão no gráfico combinado.
+        self.combined_flow_view = pg.ViewBox()
+        self.plots[2].showAxis("right")
+        self.plots[2].scene().addItem(self.combined_flow_view)
+        self.plots[2].getAxis("right").linkToView(self.combined_flow_view)
+        self.combined_flow_view.setXLink(self.plots[2])
+        self.plots[2].getAxis("right").setLabel("Vazão", units=self.flow_unit, color=COLORS["flow"])
+        self.combined_flow_curve = pg.PlotCurveItem(
+            pen=pg.mkPen(COLORS["flow"], width=2), name="Vazão"
+        )
+        self.combined_flow_view.addItem(self.combined_flow_curve)
+        self.plots[2].legend.addItem(self.combined_flow_curve, "Vazão")
+        self.plots[2].vb.sigResized.connect(self._update_combined_view)
+        self._update_combined_view()
         self.cursor_v = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen(COLORS["inactive"]))
         self.plots[0].addItem(self.cursor_v, ignoreBounds=True)
         self.plots[0].scene().sigMouseMoved.connect(self._mouse_moved)
-        self.pressure_times: list[float] = []
-        self.flow_times: list[float] = []
-        self.pressure: list[float] = []
-        self.flow: list[float] = []
-        self.ma_p: list[float] = []
-        self.flow_pressure_x: list[float] = []
-        self.flow_pressure_y: list[float] = []
-        self._latest_pressure: float | None = None
-        self._first: datetime | None = None
+        self.plots[5].setYRange(-0.2, 3.2)
 
-    def add_measurement(self, m: Measurement) -> None:
-        self.add_pressure(m.pressure)
-        self.add_flow(m.flow)
+    def _build_permeability_plots(self):
+        titles = [
+            "Permeabilidade aparente × tempo",
+            "Permeabilidade aparente × pressão média absoluta",
+            "Klinkenberg: permeabilidade × 1/Pm",
+        ]
+        self.permeability_plots = []
+        for index, title in enumerate(titles):
+            plot = self.permeability_graphics.addPlot(row=index, col=0, title=title)
+            plot.showGrid(x=True, y=True, alpha=0.18)
+            plot.addLegend(offset=(5, 5))
+            self.permeability_plots.append(plot)
+        self.permeability_plots[0].setLabel("left", "Permeabilidade aparente", units="mD")
+        self.permeability_plots[1].setLabel("bottom", "Pressão média absoluta", units="kPa abs")
+        self.permeability_plots[1].setLabel("left", "Permeabilidade aparente", units="mD")
+        self.permeability_plots[2].setLabel("bottom", "1/Pm", units="1/kPa")
+        self.permeability_plots[2].setLabel("left", "Permeabilidade aparente", units="mD")
+        self.permeability_curves = {
+            "time": self.permeability_plots[0].plot(
+                pen=pg.mkPen(COLORS["accent"], width=2), symbol="o", name="k aparente"
+            ),
+            "pressure": self.permeability_plots[1].plot(
+                pen=pg.mkPen(COLORS["accent"], width=2), symbol="o", name="k aparente"
+            ),
+            "points": self.permeability_plots[2].plot(
+                pen=None, symbol="o", symbolBrush=COLORS["pressure"], name="Pontos experimentais"
+            ),
+            "fit": self.permeability_plots[2].plot(
+                pen=pg.mkPen(COLORS["flow"], width=2), name="Reta ajustada"
+            ),
+        }
+
+    @staticmethod
+    def _quality_value(reading: SensorReading) -> int:
+        return {
+            ReadingQuality.VALID: 3,
+            ReadingQuality.SIMULATED: 3,
+            ReadingQuality.WARNING: 2,
+            ReadingQuality.STALE: 1,
+        }.get(reading.quality, 0)
+
+    def add_measurement(self, measurement: Measurement) -> None:
+        self.add_combined_measurement(measurement)
 
     def add_pressure(self, reading: SensorReading) -> None:
         timestamp = reading.timestamp or datetime.now()
         if self._first is None:
             self._first = timestamp
         self.pressure_times.append((timestamp - self._first).total_seconds())
-        nan = float("nan")
-        self.pressure.append(reading.value if reading.value is not None else nan)
-        self.ma_p.append(reading.current_ma if reading.current_ma is not None else nan)
-        self._latest_pressure = reading.value
-        if len(self.pressure_times) > 100_000:
-            for values in (self.pressure_times, self.pressure, self.ma_p):
-                del values[:10_000]
+        self.pressure.append(reading.value if reading.valid else float("nan"))
+        self.ma_p.append(
+            reading.current_ma if reading.valid and reading.current_ma is not None else float("nan")
+        )
         if not self.visual_pause.isChecked():
             self.refresh()
 
@@ -388,22 +522,32 @@ class GraphsPage(QWidget):
         if self._first is None:
             self._first = reading.timestamp
         self.flow_times.append((reading.timestamp - self._first).total_seconds())
-        self.flow.append(reading.value if reading.value is not None else float("nan"))
-        if reading.value is not None and self._latest_pressure is not None:
-            self.flow_pressure_x.append(self._latest_pressure)
-            self.flow_pressure_y.append(reading.value)
-        if len(self.flow_times) > 100_000:
-            del self.flow_times[:10_000]
-            del self.flow[:10_000]
+        self.flow.append(reading.value if reading.valid else float("nan"))
+        if not self.visual_pause.isChecked():
+            self.refresh()
+
+    def add_combined_measurement(self, measurement: Measurement) -> None:
+        timestamp = measurement.received_at
+        if self._first is None:
+            self._first = timestamp
+        elapsed = (timestamp - self._first).total_seconds()
+        self.quality_times.append(elapsed)
+        self.pressure_quality.append(self._quality_value(measurement.pressure))
+        self.flow_quality.append(self._quality_value(measurement.flow))
+        if (
+            measurement.communication_state.upper() == "OK"
+            and measurement.pressure.valid
+            and measurement.flow.valid
+        ):
+            self.flow_pressure_x.append(float(measurement.pressure.value))
+            self.flow_pressure_y.append(float(measurement.flow.value))
         if not self.visual_pause.isChecked():
             self.refresh()
 
     def refresh(self) -> None:
-        if not self.pressure_times and not self.flow_times:
-            return
         window = [60, 300, None][self.window_combo.currentIndex()]
 
-        def selected(times: list[float], values: list[float]) -> tuple[list[float], list[float]]:
+        def selected(times, values):
             start = 0
             if window is not None and times:
                 threshold = times[-1] - window
@@ -414,38 +558,172 @@ class GraphsPage(QWidget):
         px, pressure = selected(self.pressure_times, self.pressure)
         _, current = selected(self.pressure_times, self.ma_p)
         fx, flow = selected(self.flow_times, self.flow)
+        qx, pq = selected(self.quality_times, self.pressure_quality)
+        _, fq = selected(self.quality_times, self.flow_quality)
         self.curves["pressure"].setData(px, pressure)
         self.curves["combined_p"].setData(px, pressure)
         self.curves["ma_p"].setData(px, current)
         self.curves["flow"].setData(fx, flow)
-        self.curves["combined_f"].setData(fx, flow)
+        self.combined_flow_curve.setData(fx, flow)
         self.curves["flow_pressure"].setData(
             self.flow_pressure_x[-3000:], self.flow_pressure_y[-3000:]
         )
+        self.curves["quality_p"].setData(qx, pq)
+        self.curves["quality_f"].setData(qx, fq)
         if self.auto_zoom.isChecked():
-            for plot in self.plots:
-                plot.enableAutoRange()
+            self.restore_view()
 
-    def reset(self) -> None:
+    def load_calculations(self, rows) -> None:
+        from services.chart_service import ChartService
+
         for values in (
-            self.pressure_times,
-            self.flow_times,
-            self.pressure,
-            self.flow,
-            self.ma_p,
-            self.flow_pressure_x,
-            self.flow_pressure_y,
+            self.permeability_times,
+            self.permeability_values,
+            self.permeability_pressures,
+            self.permeability_pressure_values,
+            self.klinkenberg_x,
+            self.klinkenberg_y,
+            self.klinkenberg_fit_x,
+            self.klinkenberg_fit_y,
         ):
             values.clear()
-        self._latest_pressure = None
+        records = ChartService.calculation_records(rows)
+        first_time = None
+        for record in records:
+            result = record["results"]
+            value = result.get("permeability_md")
+            pressure = result.get("mean_pressure_kpa_abs")
+            timestamp = (
+                datetime.fromisoformat(record["timestamp"]) if record.get("timestamp") else None
+            )
+            if value is not None and timestamp:
+                first_time = first_time or timestamp
+                self.permeability_times.append((timestamp - first_time).total_seconds())
+                self.permeability_values.append(float(value))
+                if pressure is not None:
+                    self.permeability_pressures.append(float(pressure))
+                    self.permeability_pressure_values.append(float(value))
+            if str(record.get("tipo", "")).lower() == "klinkenberg":
+                points = result.get("points_used") or record["inputs"].get("points") or []
+                parsed = [
+                    (
+                        float(p.get("inverse_pressure_kpa", 1 / p.get("mean_pressure_kpa_abs"))),
+                        float(p["permeability_md"]),
+                    )
+                    for p in points
+                    if isinstance(p, dict)
+                    and p.get("permeability_md") is not None
+                    and (p.get("mean_pressure_kpa_abs") or p.get("inverse_pressure_kpa"))
+                ]
+                self.klinkenberg_x = [x for x, _ in parsed]
+                self.klinkenberg_y = [y for _, y in parsed]
+                slope = result.get("slope_md_kpa")
+                intercept = result.get("intrinsic_permeability_md")
+                if parsed and slope is not None and intercept is not None:
+                    self.klinkenberg_fit_x = [min(self.klinkenberg_x), max(self.klinkenberg_x)]
+                    self.klinkenberg_fit_y = [
+                        float(intercept) + float(slope) * x for x in self.klinkenberg_fit_x
+                    ]
+                    self.permeability_plots[2].setTitle(
+                        f"Klinkenberg · k∞={float(intercept):.5g} mD · b={float(result.get('slip_factor_kpa', 0)):.5g} kPa · R²={float(result.get('r_squared', 0)):.4f}"
+                    )
+        self.permeability_curves["time"].setData(self.permeability_times, self.permeability_values)
+        self.permeability_curves["pressure"].setData(
+            self.permeability_pressures, self.permeability_pressure_values
+        )
+        self.permeability_curves["points"].setData(self.klinkenberg_x, self.klinkenberg_y)
+        self.permeability_curves["fit"].setData(self.klinkenberg_fit_x, self.klinkenberg_fit_y)
+        self.permeability_message.setVisible(not bool(records))
+
+    def load_history(
+        self, test_id: int, measurements, calculations, pressure_unit: str, flow_unit: str
+    ) -> None:
+        self.reset()
+        self._historical_test_id = test_id
+        self.pressure_unit, self.flow_unit = pressure_unit, flow_unit
+        was_paused = self.visual_pause.isChecked()
+        self.visual_pause.setChecked(True)
+        for raw in measurements:
+            row = dict(raw)
+            timestamp = datetime.fromisoformat(row["timestamp_computador"])
+            pressure_ts = (
+                datetime.fromisoformat(row["timestamp_pressao"])
+                if row.get("timestamp_pressao")
+                else timestamp
+            )
+            flow_ts = (
+                datetime.fromisoformat(row["timestamp_vazao"])
+                if row.get("timestamp_vazao")
+                else timestamp
+            )
+
+            def quality(valid, status):
+                upper = str(status or "").upper()
+                if "DISCONNECTED" in upper:
+                    return ReadingQuality.DISCONNECTED
+                if "STALE" in upper:
+                    return ReadingQuality.STALE
+                return ReadingQuality.VALID if valid else ReadingQuality.INVALID
+
+            measurement = Measurement(
+                timestamp,
+                pressure=SensorReading(
+                    value=row.get("pressao"),
+                    current_ma=row.get("pressao_ma"),
+                    quality=quality(row.get("pressao_valida"), row.get("status_pressao")),
+                    timestamp=pressure_ts,
+                    unit=pressure_unit,
+                ),
+                flow=SensorReading(
+                    value=row.get("vazao"),
+                    quality=quality(row.get("vazao_valida"), row.get("status_vazao")),
+                    timestamp=flow_ts,
+                    unit=flow_unit,
+                ),
+                communication_state=row.get("estado_comunicacao") or "INVALID",
+            )
+            self.add_pressure(measurement.pressure)
+            self.add_flow(measurement.flow)
+            self.add_combined_measurement(measurement)
+        self.load_calculations(calculations)
+        self.visual_pause.setChecked(was_paused)
+        self.refresh()
+
+    def reset(self) -> None:
+        self._historical_test_id = None
         self._first = None
-        for curve in self.curves.values():
-            curve.clear()
+        self._initialize_data()
+        if hasattr(self, "curves"):
+            for curve in self.curves.values():
+                curve.clear()
+            self.combined_flow_curve.clear()
+            for curve in self.permeability_curves.values():
+                curve.clear()
+            self.permeability_message.show()
+
+    def restore_view(self) -> None:
+        for plot in [*self.plots, *self.permeability_plots]:
+            plot.enableAutoRange()
+        self.combined_flow_view.enableAutoRange()
+
+    def export_items(self, mode: str = "all"):
+        process = [(f"processo_{index + 1}", plot) for index, plot in enumerate(self.plots)]
+        permeability = [
+            (f"permeabilidade_{index + 1}", plot)
+            for index, plot in enumerate(self.permeability_plots)
+        ]
+        if mode == "all":
+            return process + permeability
+        group, index = self.export_graph_combo.currentData()
+        return [process[index] if group == "process" else permeability[index]]
+
+    def _update_combined_view(self):
+        self.combined_flow_view.setGeometry(self.plots[2].vb.sceneBoundingRect())
+        self.combined_flow_view.linkedViewChanged(self.plots[2].vb, self.combined_flow_view.XAxis)
 
     def _mouse_moved(self, pos) -> None:
         if self.plots[0].sceneBoundingRect().contains(pos):
-            point = self.plots[0].vb.mapSceneToView(pos)
-            self.cursor_v.setPos(point.x())
+            self.cursor_v.setPos(self.plots[0].vb.mapSceneToView(pos).x())
 
 
 class TestPage(QWidget):

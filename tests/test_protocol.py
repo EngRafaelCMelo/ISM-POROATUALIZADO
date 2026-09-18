@@ -107,6 +107,19 @@ def test_pressure_event_does_not_change_flow_timestamp(config_data: dict) -> Non
     service.stop()
 
 
+def test_combined_measurement_rejects_timestamps_outside_sync_window(
+    config_data: dict,
+) -> None:
+    service = AcquisitionService(config_data)
+    service.process_real(json.dumps(payload()))
+    service.process_flow(FlowReading(0.240, 240, datetime.now() + timedelta(seconds=2)))
+    combined = service.emit_combined_measurement()
+    assert combined is not None
+    assert combined.pressure.valid and combined.flow.valid
+    assert combined.communication_state == "UNSYNCHRONIZED"
+    service.stop()
+
+
 def test_flow_is_not_rejected_by_a_presumed_maximum(config_data: dict) -> None:
     service = AcquisitionService(config_data)
     service.process_flow(FlowReading(1250.0, 1_250_000, datetime.now()))

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QInputDialog, QMessageBox
 
 from config.settings import AppPaths, ConfigManager
@@ -33,6 +34,11 @@ def test_finishing_test_generates_pdf_automatically(tmp_path, monkeypatch) -> No
     )
     window.calculation_test_id = session.id
     window.calculations.set_session(session.definition, "active")
+    window.calculations.last_permeability = (
+        {"gas": "Helio", "data_origin": "entrada_manual"},
+        {"permeability_md": 12.5, "mean_pressure_kpa_abs": 150.0},
+    )
+    window.calculations._dirty_results.add("Permeabilidade a gás")
 
     monkeypatch.setattr(
         QMessageBox,
@@ -58,8 +64,16 @@ def test_finishing_test_generates_pdf_automatically(tmp_path, monkeypatch) -> No
     window._finish_test()
 
     assert window.test_service.current is None
+    for _ in range(800):
+        generated = list(paths.exports.glob("ENS-2026-0200_relatorio_final*.pdf"))
+        if generated and generated[0].stat().st_size > 500 and not window.export_workers:
+            break
+        QTest.qWait(25)
     reports = list(paths.exports.glob("ENS-2026-0200_relatorio_final*.pdf"))
     assert len(reports) == 1
     assert reports[0].stat().st_size > 500
+    saved = window.calculation_repository.list(session.id)
+    assert len(saved) == 1
+    assert saved[0]["tipo"] == "Permeabilidade a gás"
     assert window.overview._report_ready
     window.close()
