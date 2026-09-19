@@ -30,6 +30,13 @@ jobs:
         run: |
           $exe = Get-ChildItem -LiteralPath dist -Filter '*.exe' -Recurse | Select-Object -First 1
           if (-not $exe) { throw 'Executável não encontrado em dist.' }
+          $reportDir = Join-Path $env:RUNNER_TEMP 'ism-report-smoke'
+          New-Item -ItemType Directory -Force -Path $reportDir | Out-Null
+          $reportProcess = Start-Process -FilePath $exe.FullName -ArgumentList @('--report-smoke', $reportDir) -PassThru -Wait -WindowStyle Hidden
+          if ($reportProcess.ExitCode -ne 0) { throw "Geração do PDF pelo executável falhou: $($reportProcess.ExitCode)" }
+          $pdf = Get-ChildItem -LiteralPath $reportDir -Filter '*.pdf' | Select-Object -First 1
+          if (-not $pdf) { throw 'PDF não encontrado após execução do pacote.' }
+          python -c "from pypdf import PdfReader; import sys; r=PdfReader(sys.argv[1]); text=' '.join(p.extract_text() or '' for p in r.pages); assert 'RELATÓRIO DEMONSTRATIVO - DADOS FICTÍCIOS' in text; assert len(r.pages[0].images) >= 1" $pdf.FullName
           $process = Start-Process -FilePath $exe.FullName -PassThru -WindowStyle Hidden
           Start-Sleep -Seconds 5
           if ($process.HasExited) { throw "Executável encerrou com código $($process.ExitCode)." }

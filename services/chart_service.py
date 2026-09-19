@@ -274,6 +274,15 @@ class ChartService:
         values = pd.to_numeric(series[column], errors="coerce")
         return int(np.isfinite(values).sum()) >= minimum
 
+    @staticmethod
+    def _time_formatter(*series: pd.DataFrame) -> mdates.DateFormatter:
+        timestamps = pd.concat(
+            [item["timestamp"].dropna() for item in series if "timestamp" in item],
+            ignore_index=True,
+        )
+        days = timestamps.dt.normalize().nunique() if not timestamps.empty else 0
+        return mdates.DateFormatter("%d/%m %H:%M" if days > 1 else "%H:%M:%S")
+
     def sensor_time_chart(self, records, sensor: str, unit: str) -> ChartImage | None:
         names = {"pressao": "Pressão × tempo", "vazao": "Vazão × tempo"}
         series = self.plot_sensor_series(records, sensor)
@@ -285,7 +294,7 @@ class ChartService:
         ax.plot(series["timestamp"], series["value"], color=color, linewidth=1.5)
         ax.set_xlabel("Data e hora")
         ax.set_ylabel(f"{'Pressão' if sensor == 'pressao' else 'Vazão'} ({unit})", color=color)
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M:%S"))
+        ax.xaxis.set_major_formatter(self._time_formatter(series))
         fig.autofmt_xdate(rotation=25)
         return self._finish(fig, f"{sensor}_tempo", title)
 
@@ -307,7 +316,7 @@ class ChartService:
         left.set_ylabel(f"Pressão ({pressure_unit})", color=COLORS["pressure"])
         right.set_ylabel(f"Vazão ({flow_unit})", color=COLORS["flow"])
         left.legend([p_line, f_line], ["Pressão", "Vazão"], loc="best")
-        left.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M:%S"))
+        left.xaxis.set_major_formatter(self._time_formatter(pressure, flow))
         fig.autofmt_xdate(rotation=25)
         return self._finish(fig, "pressao_vazao_tempo", title)
 

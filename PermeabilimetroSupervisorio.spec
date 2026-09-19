@@ -14,6 +14,7 @@ a = Analysis(
         (str(root / "ui" / "styles.qss"), "ui"),
         (str(root / "config" / "default_config.json"), "config"),
         (str(root / "assets" / "branding"), "assets/branding"),
+        (str(root / "assets" / "fonts"), "assets/fonts"),
     ],
     hiddenimports=[
         "openpyxl",

@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QInputDialog, QMessageBox
 
 from config.settings import AppPaths, ConfigManager
+from core.constants import ReadingQuality
+from core.models import SensorReading
 from core.models import TestDefinition as Definition
 from database.database import Database
 from ui.main_window import MainWindow
@@ -39,6 +43,22 @@ def test_finishing_test_generates_pdf_automatically(tmp_path, monkeypatch) -> No
         {"permeability_md": 12.5, "mean_pressure_kpa_abs": 150.0},
     )
     window.calculations._dirty_results.add("Permeabilidade a gás")
+    now = datetime.now()
+    window.acquisition.latest_pressure = SensorReading(
+        value=150.0,
+        quality=ReadingQuality.VALID,
+        device_status="OK",
+        unit="psi",
+        timestamp=now,
+    )
+    window.acquisition.latest_flow = SensorReading(
+        value=2.5,
+        quality=ReadingQuality.VALID,
+        device_status="OK",
+        unit="NL/min",
+        timestamp=now,
+    )
+    window.acquisition._dirty = True
 
     monkeypatch.setattr(
         QMessageBox,
@@ -75,5 +95,8 @@ def test_finishing_test_generates_pdf_automatically(tmp_path, monkeypatch) -> No
     saved = window.calculation_repository.list(session.id)
     assert len(saved) == 1
     assert saved[0]["tipo"] == "Permeabilidade a gás"
+    measurements = window.test_repository.measurements(session.id)
+    assert len(measurements) == 1
+    assert measurements[0]["pressao"] == 150.0
     assert window.overview._report_ready
     window.close()

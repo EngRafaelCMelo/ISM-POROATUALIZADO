@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 
 import matplotlib.pyplot as plt
 import pandas as pd
+from pypdf import PdfReader
 
 from core.constants import ReadingQuality, Severity
 from core.models import Alarm, Measurement, SensorReading
@@ -87,6 +88,13 @@ def test_invalid_reading_creates_visible_gap() -> None:
     series = ChartService().sensor_series(measurement_frame(), "pressao")
     assert pd.isna(series.iloc[2]["value"])
     assert series["value"].notna().sum() == 4
+
+
+def test_process_chart_uses_dates_when_test_spans_multiple_days() -> None:
+    frame = measurement_frame()
+    frame.loc[4, "timestamp_pressao"] = datetime(2026, 9, 19, 10).isoformat()
+    series = ChartService().sensor_series(frame, "pressao")
+    assert ChartService._time_formatter(series).fmt == "%d/%m %H:%M"
 
 
 def test_permeability_and_klinkenberg_charts() -> None:
@@ -201,6 +209,7 @@ def test_pdf_without_measurements_or_calculations_is_valid(tmp_path) -> None:
     target = ExportService(tests, events).export_pdf(session.id, tmp_path)
     assert target.read_bytes().startswith(b"%PDF")
     assert target.stat().st_size > 1000
+    assert "Firmware não disponível" in PdfReader(target).pages[0].extract_text()
     database.close()
 
 

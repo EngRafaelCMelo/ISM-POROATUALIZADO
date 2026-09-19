@@ -16,3 +16,7 @@ def resource_path(*parts: str) -> Path:
 
 def branding_path(filename: str) -> Path:
     return resource_path("assets", "branding", filename)
+
+
+def font_path(filename: str) -> Path:
+    return resource_path("assets", "fonts", filename)

@@ -771,6 +771,10 @@ class MainWindow(QMainWindow):
         if not accepted:
             return
         try:
+            # Persiste a última combinação pendente antes de encerrar a sessão.
+            # O sinal é entregue de forma síncrona na thread da interface e cada
+            # gravação termina sua transação antes de o relatório ser iniciado.
+            self.acquisition.emit_combined_measurement()
             pending = self.calculations.pending_results()
             if pending:
                 save_response = QMessageBox.question(

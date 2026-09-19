@@ -115,6 +115,29 @@ Os testes Qt usam `QT_QPA_PLATFORM=offscreen`. Bancos antigos são migrados de
 forma incremental: campos legados de vazão são apenas fallback de leitura e não
 recebem novas medições. Backups SQLite possuem timestamp e retenção configurável.
 
+## Relatório final
+
+O PDF é gerado após a confirmação do encerramento e da persistência do ensaio,
+sempre pelo ID da sessão recém-finalizada. Inclui capa, dados da amostra,
+aquisição, estatísticas da série integral válida, quatro gráficos de processo,
+tabela paginada de permeabilidade, ajuste de Klinkenberg, três gráficos de
+análise, ocorrências e assinatura. Ensaios simulados são identificados na capa.
+O PDF pode ser exportado novamente pelo histórico.
+
+A logo e as fontes DejaVu Sans ficam em `assets/branding` e `assets/fonts`.
+No executável, o `.spec` as copia para `_internal/assets`; `ui/resources.py`
+resolve esses arquivos por `sys._MEIPASS`, sem depender do diretório de trabalho.
+Para verificar o PDF pelo executável sem acessar dados do operador:
+
+```powershell
+dist\PermeabilimetroSupervisorio_v2_2_0\PermeabilimetroSupervisorio_v2_2_0.exe --report-smoke "$env:TEMP\ism-report-smoke"
+```
+
+Esse diagnóstico usa um banco SQLite temporário e gera um relatório marcado
+como demonstrativo. Não substitui a validação do fluxo real com o equipamento.
+O PDF em `artifacts/final-report` também usa dados fictícios de teste; não
+representa um ensaio realizado em equipamento físico.
+
 ## Firmware
 
 - `firmware/`: build oficial PlatformIO;

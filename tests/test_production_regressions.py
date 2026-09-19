@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 
 import pandas as pd
 import pytest
+from pypdf import PdfReader
 from PySide6.QtWidgets import QDialog, QMessageBox
 
 from config.settings import AppPaths, ConfigManager
@@ -392,5 +393,6 @@ def test_full_statistics_match_xlsx_for_more_than_2500_points(tmp_path, monkeypa
     assert xlsx_pressure["Média"] == pytest.approx(expected.mean())
     assert pdf.stat().st_size > 20_000
     assert pdf.read_bytes().count(b"/Subtype /Image") >= 3
-    assert b"NaN" not in pdf.read_bytes()
+    extracted = "\n".join(page.extract_text() or "" for page in PdfReader(pdf).pages)
+    assert "NaN" not in extracted
     database.close()

@@ -5,16 +5,66 @@ from __future__ import annotations
 import ctypes
 import logging
 import sys
+from datetime import datetime, timedelta
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import QApplication, QMessageBox, QSplashScreen
 
 from config.settings import AppPaths, ConfigManager
+from core.constants import ReadingQuality
+from core.models import Measurement, SensorReading, TestDefinition
 from core.version import APP_NAME, APP_VERSION
 from database.database import Database
+from database.repositories import EventRepository, TestRepository
+from services.export_service import ExportService
 from ui.main_window import MainWindow
 from ui.resources import branding_path
+
+
+def report_smoke(directory: Path) -> Path:
+    """Exercita a exportação no executável sem acessar dados reais do operador."""
+    with TemporaryDirectory(prefix="ism-report-smoke-") as temporary:
+        database = Database(Path(temporary) / "smoke.db")
+        database.initialize()
+        tests = TestRepository(database)
+        events = EventRepository(database)
+        session = tests.create(
+            TestDefinition(
+                code="ENS-PACOTE-SIMULADO",
+                sample_name="Amostra de validação",
+                operator="Teste de empacotamento",
+                simulated=True,
+            )
+        )
+        now = datetime.now()
+        for index in range(3):
+            timestamp = now + timedelta(seconds=index)
+            tests.save_measurement(
+                session.id,
+                Measurement(
+                    received_at=timestamp,
+                    pressure=SensorReading(
+                        value=100.0 + index,
+                        quality=ReadingQuality.SIMULATED,
+                        device_status="OK",
+                        timestamp=timestamp,
+                    ),
+                    flow=SensorReading(
+                        value=10.0 + index,
+                        quality=ReadingQuality.SIMULATED,
+                        device_status="OK",
+                        timestamp=timestamp + timedelta(milliseconds=100),
+                    ),
+                    communication_state="OK",
+                    simulated=True,
+                    schema_version=1,
+                ),
+            )
+        tests.finish(session.id, "Validação de á é í ó ú ç ° ² Δ ∞ × R²")
+        return ExportService(tests, events).export_pdf(session.id, directory)
 
 
 def configure_logging(paths: AppPaths) -> None:
@@ -95,4 +145,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    if len(sys.argv) == 3 and sys.argv[1] == "--report-smoke":
+        report_smoke(Path(sys.argv[2]))
+    else:
+        raise SystemExit(main())

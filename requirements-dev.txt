@@ -3,3 +3,5 @@ pytest==9.1.1
 ruff==0.14.0
 pyinstaller==6.21.0
 platformio==6.1.18
+pypdf==6.19.0
+pypdfium2==5.13.0

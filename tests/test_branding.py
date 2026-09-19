@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from ui.resources import branding_path, resource_path
+from ui.resources import branding_path, font_path, resource_path
 
 
 def test_official_branding_assets_are_local_and_loadable() -> None:
@@ -48,4 +48,10 @@ def test_pyinstaller_uses_local_branding_icon() -> None:
     spec = Path("PermeabilimetroSupervisorio.spec").read_text(encoding="utf-8")
     assert "ism_app_icon.ico" in spec
     assert "assets/branding" in spec
+    assert "assets/fonts" in spec
     assert "C:\\Users" not in spec
+
+
+def test_unicode_fonts_and_license_are_local() -> None:
+    for filename in ("DejaVuSans.ttf", "DejaVuSans-Bold.ttf", "LICENSE_DEJAVU"):
+        assert font_path(filename).is_file()
