@@ -63,6 +63,7 @@ def combined_measurement(
             timestamp=timestamp + timedelta(milliseconds=100),
             device_status=quality.name,
             raw_value=456,
+            unit="L/min",
         ),
         communication_state=state,
         sequence=sequence,
@@ -88,6 +89,7 @@ def calculation_page() -> CalculationPage:
         )
     )
     page.outlet_mode.setCurrentIndex(page.outlet_mode.findData("atmosphere"))
+    page.flow_ref.setValue(101.325)
     return page
 
 
@@ -102,7 +104,7 @@ def test_start_test_through_main_window_uses_active_mode(tmp_path, monkeypatch) 
         "ACTIVE-1",
         "Amostra",
         pressure_unit="bar",
-        flow_unit="L/min",
+        flow_unit="NL/min",
         sample_length_mm=50,
         sample_diameter_mm=25,
     )
@@ -121,7 +123,7 @@ def test_start_test_through_main_window_uses_active_mode(tmp_path, monkeypatch) 
     assert window.calculations.capture_button.isEnabled()
     assert window.calculations.calculate_button.isEnabled()
     assert window.graphs.pressure_unit == "bar"
-    assert window.graphs.flow_unit == "L/min"
+    assert window.graphs.flow_unit == "NL/min"
     window.test_service.current = None
     window.close()
 

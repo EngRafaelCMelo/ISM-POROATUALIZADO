@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 SCHEMA_SQL = """
 PRAGMA journal_mode=WAL;
@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER NOT NULL
 );
 INSERT INTO schema_version(version)
-SELECT 4 WHERE NOT EXISTS (SELECT 1 FROM schema_version);
+SELECT 5 WHERE NOT EXISTS (SELECT 1 FROM schema_version);
 
 CREATE TABLE IF NOT EXISTS usuarios (
     id INTEGER PRIMARY KEY,
@@ -59,6 +59,8 @@ CREATE TABLE IF NOT EXISTS ensaios (
     inicio TEXT NOT NULL,
     fim TEXT,
     duracao_segundos REAL DEFAULT 0,
+    duracao_decorrida_segundos REAL,
+    duracao_pausada_segundos REAL,
     quantidade_amostras INTEGER DEFAULT 0,
     pressao_maxima REAL,
     vazao_maxima REAL,
@@ -175,6 +177,8 @@ CREATE INDEX IF NOT EXISTS idx_calculos_ensaio ON calculos(ensaio_id, timestamp)
 
 
 TEST_COLUMNS: dict[str, str] = {
+    "duracao_decorrida_segundos": "REAL",
+    "duracao_pausada_segundos": "REAL",
     "comprimento_amostra_mm": "REAL",
     "diametro_amostra_mm": "REAL",
     "massa_amostra_g": "REAL",
@@ -219,7 +223,6 @@ def apply_migrations(connection: sqlite3.Connection) -> None:
             connection.execute(f"ALTER TABLE medicoes ADD COLUMN {name} {sql_type}")
     connection.execute(
         """UPDATE medicoes SET vazao=COALESCE(vazao, vazao_baixa, vazao_alta),
-           unidade_vazao=COALESCE(unidade_vazao, 'L/min'),
            vazao_valida=COALESCE(vazao_valida, CASE WHEN COALESCE(vazao, vazao_baixa, vazao_alta) IS NULL THEN 0 ELSE 1 END),
            timestamp_vazao=COALESCE(timestamp_vazao, timestamp_computador),
            status_vazao=COALESCE(status_vazao, CASE WHEN COALESCE(vazao, vazao_baixa, vazao_alta) IS NULL THEN 'LEGACY_MISSING' ELSE 'LEGACY_OK' END),

@@ -119,17 +119,35 @@ class TestRepository:
         with self.db.transaction() as con:
             con.execute("UPDATE ensaios SET status=? WHERE id=?", (status.value, test_id))
 
-    def finish(self, test_id: int, final_note: str = "") -> None:
-        now = datetime.now()
+    def finish(
+        self,
+        test_id: int,
+        final_note: str = "",
+        paused_seconds: float = 0.0,
+        *,
+        finished_at: datetime | None = None,
+    ) -> None:
+        now = finished_at or datetime.now()
         with self.db.transaction() as con:
             row = con.execute("SELECT inicio FROM ensaios WHERE id=?", (test_id,)).fetchone()
             if not row:
                 raise ValueError("Ensaio não encontrado")
-            duration = (now - datetime.fromisoformat(row["inicio"])).total_seconds()
+            elapsed = max(0.0, (now - datetime.fromisoformat(row["inicio"])).total_seconds())
+            paused = min(max(0.0, paused_seconds), elapsed)
+            duration = elapsed - paused
             con.execute(
                 """UPDATE ensaios SET status=?, fim=?, duracao_segundos=?,
+                   duracao_decorrida_segundos=?, duracao_pausada_segundos=?,
                    observacao_final=? WHERE id=?""",
-                (TestStatus.FINISHED.value, now.isoformat(), duration, final_note, test_id),
+                (
+                    TestStatus.FINISHED.value,
+                    now.isoformat(),
+                    duration,
+                    elapsed,
+                    paused,
+                    final_note,
+                    test_id,
+                ),
             )
 
     def mark_interrupted_tests(self) -> int:

@@ -18,6 +18,8 @@ GAS_PROPERTIES = {
 
 
 def pressure_to_kpa(value: float, unit: str) -> float:
+    if not math.isfinite(value):
+        raise ValueError("A pressão deve ser finita")
     try:
         return value * {"kPa": 1.0, "bar": 100.0, "MPa": 1000.0, "psi": 6.894757293}[unit]
     except KeyError as exc:
@@ -25,6 +27,10 @@ def pressure_to_kpa(value: float, unit: str) -> float:
 
 
 def absolute_pressure_kpa(value: float, unit: str, reference: str, atmospheric_kpa: float) -> float:
+    if not math.isfinite(atmospheric_kpa) or atmospheric_kpa <= 0:
+        raise ValueError("A pressão atmosférica deve ser positiva e finita")
+    if reference not in {"manometrica", "absoluta"}:
+        raise ValueError("Referência de pressão deve ser manométrica ou absoluta")
     result = pressure_to_kpa(value, unit) + (
         atmospheric_kpa if reference.lower().startswith("manom") else 0.0
     )
@@ -34,7 +40,7 @@ def absolute_pressure_kpa(value: float, unit: str, reference: str, atmospheric_k
 
 
 def cylindrical_volume_cm3(length_mm: float, diameter_mm: float) -> float:
-    if length_mm <= 0 or diameter_mm <= 0:
+    if not all(map(math.isfinite, (length_mm, diameter_mm))) or length_mm <= 0 or diameter_mm <= 0:
         raise ValueError("Comprimento e diâmetro precisam ser maiores que zero")
     return math.pi * (diameter_mm / 10) ** 2 * (length_mm / 10) / 4
 
@@ -64,11 +70,30 @@ def calculate_gas_permeability(
     flow_reference_pressure_kpa_abs: float | None = None,
 ) -> PermeabilityResult:
     """Darcy isotérmico compressível: k=2μLQref·Pref/[A(Pin²-Pout²)], em SI."""
+    reference = (
+        outlet_pressure_kpa_abs
+        if flow_reference_pressure_kpa_abs is None
+        else flow_reference_pressure_kpa_abs
+    )
+    if not all(
+        map(
+            math.isfinite,
+            (
+                flow_l_min,
+                viscosity_upa_s,
+                length_mm,
+                diameter_mm,
+                inlet_pressure_kpa_abs,
+                outlet_pressure_kpa_abs,
+                reference,
+            ),
+        )
+    ):
+        raise ValueError("Entradas do cálculo devem ser finitas")
     if min(flow_l_min, viscosity_upa_s, length_mm, diameter_mm) <= 0:
         raise ValueError("Vazão, viscosidade, comprimento e diâmetro devem ser positivos")
     if inlet_pressure_kpa_abs <= outlet_pressure_kpa_abs or outlet_pressure_kpa_abs <= 0:
         raise ValueError("A pressão de entrada absoluta deve ser maior que a de saída")
-    reference = flow_reference_pressure_kpa_abs or outlet_pressure_kpa_abs
     if reference <= 0:
         raise ValueError("A pressão de referência da vazão precisa ser positiva")
     q, mu, length, diameter = (
@@ -117,7 +142,7 @@ def calculate_klinkenberg(points: Iterable[tuple[float, float]]) -> KlinkenbergR
     values = list(points)
     if len(values) < 2:
         raise ValueError("São necessários ao menos dois pontos de pressão e permeabilidade")
-    if any(p <= 0 or k <= 0 for p, k in values):
+    if any(not math.isfinite(p) or not math.isfinite(k) or p <= 0 or k <= 0 for p, k in values):
         raise ValueError("Pressões absolutas e permeabilidades precisam ser positivas")
     xs, ys = [1 / p for p, _ in values], [k for _, k in values]
     xm, ym = mean(xs), mean(ys)

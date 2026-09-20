@@ -12,6 +12,7 @@ from communication.protocol_parser import ProtocolError, ProtocolParser
 from communication.serial_manager import FlowReading
 from core.constants import ReadingQuality
 from core.models import Measurement, SensorReading
+from core.units import FLOW_PROTOCOL_UNIT
 from services.alarm_service import AlarmService
 
 logger = logging.getLogger(__name__)
@@ -43,7 +44,7 @@ class AcquisitionService(QObject):
         self.latest_pressure = SensorReading(
             unit=config["sensores"]["pressao"].get("unidade", "bar")
         )
-        self.latest_flow = SensorReading(unit=config["sensores"]["vazao"].get("unidade", "NL/min"))
+        self.latest_flow = SensorReading(unit=FLOW_PROTOCOL_UNIT)
         self._latest_pressure_meta: Measurement | None = None
         self._dirty = False
         self._flow_stale_announced = False
@@ -91,9 +92,10 @@ class AcquisitionService(QObject):
     def process_flow(self, flow: FlowReading | float) -> None:
         if isinstance(flow, FlowReading):
             value, raw, timestamp, status = flow.value, flow.raw_uint32, flow.timestamp, flow.status
+            unit = flow.unit
         else:  # compatibilidade com integrações anteriores e simulação
             value, raw, timestamp, status = float(flow), None, datetime.now(), "OK"
-        cfg = self.config["sensores"]["vazao"]
+            unit = self.config["sensores"]["vazao"].get("unidade", FLOW_PROTOCOL_UNIT)
         quality = (
             ReadingQuality.SIMULATED
             if self.simulation and math.isfinite(value) and value >= 0
@@ -107,7 +109,7 @@ class AcquisitionService(QObject):
             quality=quality,
             device_status=status,
             raw_value=raw,
-            unit=cfg.get("unidade", "NL/min"),
+            unit=unit,
             timestamp=timestamp,
         )
         self._flow_stale_announced = False

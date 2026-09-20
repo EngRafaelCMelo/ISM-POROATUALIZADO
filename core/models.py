@@ -124,6 +124,7 @@ class MeasurementSnapshot:
     delta_seconds: float
     simulated: bool
     origin: str = "leitura_combinada"
+    flow_unit: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         result = asdict(self)

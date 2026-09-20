@@ -34,9 +34,17 @@ jobs:
           New-Item -ItemType Directory -Force -Path $reportDir | Out-Null
           $reportProcess = Start-Process -FilePath $exe.FullName -ArgumentList @('--report-smoke', $reportDir) -PassThru -Wait -WindowStyle Hidden
           if ($reportProcess.ExitCode -ne 0) { throw "Geração do PDF pelo executável falhou: $($reportProcess.ExitCode)" }
+          $fitProcess = Start-Process -FilePath $exe.FullName -ArgumentList @('--report-smoke-klinkenberg', $reportDir) -PassThru -Wait -WindowStyle Hidden
+          if ($fitProcess.ExitCode -ne 0) { throw "Geração do PDF Klinkenberg falhou: $($fitProcess.ExitCode)" }
+          if (@(Get-ChildItem -LiteralPath $reportDir -Filter '*.pdf').Count -lt 2) { throw 'Faltam relatórios demonstrativos.' }
           $pdf = Get-ChildItem -LiteralPath $reportDir -Filter '*.pdf' | Select-Object -First 1
           if (-not $pdf) { throw 'PDF não encontrado após execução do pacote.' }
-          python -c "from pypdf import PdfReader; import sys; r=PdfReader(sys.argv[1]); text=' '.join(p.extract_text() or '' for p in r.pages); assert 'RELATÓRIO DEMONSTRATIVO - DADOS FICTÍCIOS' in text; assert len(r.pages[0].images) >= 1" $pdf.FullName
+          foreach ($report in Get-ChildItem -LiteralPath $reportDir -Filter '*.pdf') {
+            python -c "from pypdf import PdfReader; import sys; r=PdfReader(sys.argv[1]); text=' '.join(p.extract_text() or '' for p in r.pages); assert len(r.pages)>=4; assert len(r.pages[0].images)>=1; assert 'RELATÓRIO DEMONSTRATIVO - DADOS FICTÍCIOS' in text; assert 'Tempo ativo de aquisição' in text; assert 'NL/min' in text; assert not any(x in text for x in ('NaN','None','flow_l_min'))" $report.FullName
+            if ($LASTEXITCODE -ne 0) { throw "PDF inválido: $($report.FullName)" }
+          }
+          python -c "from pypdf import PdfReader; import sys; t=' '.join(p.extract_text() or '' for p in PdfReader(sys.argv[1]).pages); assert 'Pontos utilizados' in t; assert 'Coeficiente R²' in t" (Join-Path $reportDir 'ENS-PACOTE-KLINKENBERG_relatorio_final.pdf')
+          if ($LASTEXITCODE -ne 0) { throw 'Ajuste de Klinkenberg ausente do PDF.' }
           $process = Start-Process -FilePath $exe.FullName -PassThru -WindowStyle Hidden
           Start-Sleep -Seconds 5
           if ($process.HasExited) { throw "Executável encerrou com código $($process.ExitCode)." }
@@ -47,6 +55,7 @@ jobs:
           name: PermeabilimetroSupervisorio-Windows
           path: dist/
           if-no-files-found: error
+          retention-days: 14
 
   firmware:
     runs-on: ubuntu-latest

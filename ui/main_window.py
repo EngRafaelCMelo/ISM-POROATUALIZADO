@@ -724,6 +724,13 @@ class MainWindow(QMainWindow):
             return
         try:
             definition = dialog.definition()
+            if definition.flow_unit != self.acquisition.latest_flow.unit:
+                QMessageBox.warning(
+                    self,
+                    "Unidade de vazão",
+                    f"Selecione {self.acquisition.latest_flow.unit}, a unidade recebida do flowmeter.",
+                )
+                return
             definition.configuration_snapshot = json.dumps(
                 self.config.data, ensure_ascii=False, sort_keys=True
             )
@@ -859,7 +866,7 @@ class MainWindow(QMainWindow):
             measurements,
             calculations,
             row["unidade_pressao"] or "psi",
-            row["unidade_vazao"] or "NL/min",
+            row["unidade_vazao"] or "não registrada",
         )
         self._navigate(3)
         self.nav_by_page[3].setChecked(True)
@@ -881,7 +888,7 @@ class MainWindow(QMainWindow):
             notes=row["observacoes"] or "",
             expected_pressure_range=row["faixa_pressao"] or "",
             pressure_unit=row["unidade_pressao"] or "bar",
-            flow_unit=row["unidade_vazao"] or "L/min",
+            flow_unit=row["unidade_vazao"] or "não registrada",
             acquisition_interval=row["intervalo_aquisicao"] or 1.0,
             export_directory=row["diretorio_exportacao"] or "",
             sample_length_mm=row["comprimento_amostra_mm"],

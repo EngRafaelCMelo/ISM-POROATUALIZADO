@@ -17,6 +17,7 @@ from communication.modbus import (
     expected_response_size,
     parse_flow_response,
 )
+from core.units import FLOW_PROTOCOL_UNIT
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,7 @@ class FlowReading:
     timestamp: datetime
     valid: bool = True
     status: str = "OK"
+    unit: str = FLOW_PROTOCOL_UNIT
 
 
 @dataclass(slots=True)
@@ -246,7 +248,7 @@ class FlowmeterWorker(QThread):
             self.statistics.successes += 1
             self._last_error_key = ""
             self.reading_received.emit(
-                FlowReading(parsed.flow_l_min, parsed.raw_uint32, datetime.now())
+                FlowReading(parsed.value, parsed.raw_uint32, datetime.now(), unit=parsed.unit)
             )
             self._emit_statistics()
         except ModbusFrameError as exc:

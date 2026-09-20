@@ -954,7 +954,7 @@ class HistoryPage(QWidget):
                 "Amostra",
                 "Operador",
                 "Data",
-                "Duração",
+                "Tempo ativo / legado",
                 "Amostras",
                 "P. máxima",
                 "V. máxima",
@@ -1010,7 +1010,13 @@ class HistoryPage(QWidget):
                 row_data["amostra_nome"],
                 row_data["operador"],
                 datetime.fromisoformat(row_data["inicio"]).strftime("%d/%m/%Y %H:%M"),
-                f"{row_data['duracao_segundos'] or 0:.0f} s",
+                (
+                    f"{row_data['duracao_segundos'] or 0:.0f} s ativo; "
+                    f"{row_data['duracao_pausada_segundos'] or 0:.0f} s pausa; "
+                    f"{row_data['duracao_decorrida_segundos'] or 0:.0f} s total"
+                    if row_data["duracao_decorrida_segundos"] is not None
+                    else f"{row_data['duracao_segundos'] or 0:.0f} s decorrido legado"
+                ),
                 row_data["quantidade_amostras"],
                 row_data["pressao_maxima"],
                 row_data["vazao_maxima"],

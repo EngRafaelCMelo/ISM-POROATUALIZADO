@@ -38,12 +38,14 @@ def test_permeability_inputs_are_complete_and_persisted(qt_application, tmp_path
                 value=2,
                 quality=ReadingQuality.VALID,
                 timestamp=timestamp,
+                unit="L/min",
             ),
             simulated=True,
             communication_state="OK",
         )
     )
     page.outlet_mode.setCurrentIndex(page.outlet_mode.findData("atmosphere"))
+    page.flow_ref.setValue(101.325)
     page._capture()
     page._calculate()
     pending = page.pending_results()

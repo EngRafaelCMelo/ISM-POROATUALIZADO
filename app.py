@@ -16,15 +16,16 @@ from PySide6.QtWidgets import QApplication, QMessageBox, QSplashScreen
 from config.settings import AppPaths, ConfigManager
 from core.constants import ReadingQuality
 from core.models import Measurement, SensorReading, TestDefinition
+from core.permeability import calculate_klinkenberg
 from core.version import APP_NAME, APP_VERSION
 from database.database import Database
-from database.repositories import EventRepository, TestRepository
+from database.repositories import CalculationRepository, EventRepository, TestRepository
 from services.export_service import ExportService
 from ui.main_window import MainWindow
 from ui.resources import branding_path
 
 
-def report_smoke(directory: Path) -> Path:
+def report_smoke(directory: Path, *, with_klinkenberg: bool = False) -> Path:
     """Exercita a exportação no executável sem acessar dados reais do operador."""
     with TemporaryDirectory(prefix="ism-report-smoke-") as temporary:
         database = Database(Path(temporary) / "smoke.db")
@@ -33,7 +34,7 @@ def report_smoke(directory: Path) -> Path:
         events = EventRepository(database)
         session = tests.create(
             TestDefinition(
-                code="ENS-PACOTE-SIMULADO",
+                code="ENS-PACOTE-KLINKENBERG" if with_klinkenberg else "ENS-PACOTE-SIMULADO",
                 sample_name="Amostra de validação",
                 operator="Teste de empacotamento",
                 simulated=True,
@@ -50,12 +51,14 @@ def report_smoke(directory: Path) -> Path:
                         value=100.0 + index,
                         quality=ReadingQuality.SIMULATED,
                         device_status="OK",
+                        unit="psi",
                         timestamp=timestamp,
                     ),
                     flow=SensorReading(
                         value=10.0 + index,
                         quality=ReadingQuality.SIMULATED,
                         device_status="OK",
+                        unit="NL/min",
                         timestamp=timestamp + timedelta(milliseconds=100),
                     ),
                     communication_state="OK",
@@ -64,6 +67,14 @@ def report_smoke(directory: Path) -> Path:
                 ),
             )
         tests.finish(session.id, "Validação de á é í ó ú ç ° ² Δ ∞ × R²")
+        if with_klinkenberg:
+            fit = calculate_klinkenberg(((100.0, 12.0), (200.0, 11.0)))
+            CalculationRepository(database).save(
+                session.id,
+                "Klinkenberg",
+                {"points": list(fit.points_used)},
+                fit.as_dict(),
+            )
         return ExportService(tests, events).export_pdf(session.id, directory)
 
 
@@ -145,7 +156,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 3 and sys.argv[1] == "--report-smoke":
-        report_smoke(Path(sys.argv[2]))
+    if len(sys.argv) == 3 and sys.argv[1] in {"--report-smoke", "--report-smoke-klinkenberg"}:
+        report_smoke(Path(sys.argv[2]), with_klinkenberg=sys.argv[1].endswith("klinkenberg"))
     else:
         raise SystemExit(main())

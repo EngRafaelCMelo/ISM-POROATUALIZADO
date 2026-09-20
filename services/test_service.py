@@ -48,10 +48,16 @@ class TestService:
     def finish(self, final_note: str = "") -> TestSession:
         if not self.current:
             raise RuntimeError("Nenhum ensaio ativo")
-        self.tests.finish(self.current.id, final_note)
+        ended_at = datetime.now()
+        if self._paused_at:
+            self.current.paused_seconds += (ended_at - self._paused_at).total_seconds()
+            self._paused_at = None
+        self.tests.finish(
+            self.current.id, final_note, self.current.paused_seconds, finished_at=ended_at
+        )
         logger.info("Ensaio finalizado: %s", self.current.definition.code)
         self.current.status = TestStatus.FINISHED
-        self.current.ended_at = datetime.now()
+        self.current.ended_at = ended_at
         result = self.current
         self.current = None
         return result

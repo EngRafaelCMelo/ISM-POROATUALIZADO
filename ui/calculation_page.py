@@ -30,6 +30,7 @@ from core.permeability import (
     calculate_gas_permeability,
     calculate_klinkenberg,
 )
+from core.units import FLOW_PROTOCOL_UNIT, flow_for_permeability
 
 
 def field(minimum=0.0, maximum=1_000_000.0, decimals=5, suffix=""):
@@ -61,6 +62,8 @@ class CalculationPage(QWidget):
         self._captured = False
         self._captured_snapshot: MeasurementSnapshot | None = None
         self._captured_input_signature: tuple[Any, ...] | None = None
+        self._calculation_identity: tuple[Any, ...] | None = None
+        self._point_identities: list[tuple[Any, ...]] = []
         root = QVBoxLayout(self)
         title = QLabel("Permeabilidade")
         title.setObjectName("pageTitle")
@@ -117,9 +120,21 @@ class CalculationPage(QWidget):
         form = QFormLayout()
         self.inlet = field(-1000)
         self.outlet = field(-1000)
-        self.flow = field(0, 1e6, 6, "L/min")
-        self.flow_ref = field(0.001, 1e6, 5, "kPa abs")
-        self.flow_ref.setValue(101.325)
+        self.flow = field(0, 1e6, 6)
+        self.flow_unit = QComboBox()
+        self.flow_unit.addItems([FLOW_PROTOCOL_UNIT, "L/min", "mL/min"])
+        self.flow_ref = field(0, 1e6, 5, "kPa abs")
+        self.flow_ref.setValue(
+            float(self.config.get("flowmeter", {}).get("normal_pressure_kpa_abs") or 0)
+        )
+        self.normal_temperature = field(-273.15, 300, 2, "°C")
+        self.normal_temperature.setValue(
+            float(self.config.get("flowmeter", {}).get("normal_temperature_c") or 0)
+        )
+        self.normal_reference_confirmed = bool(
+            self.config.get("flowmeter", {}).get("normal_pressure_kpa_abs") is not None
+            and self.config.get("flowmeter", {}).get("normal_temperature_c") is not None
+        )
         self.outlet_mode = QComboBox()
         self.outlet_mode.addItem("Informada manualmente", "manual")
         self.outlet_mode.addItem("Fixa configurada", "fixed")
@@ -129,7 +144,9 @@ class CalculationPage(QWidget):
             ("Pressão de saída", self.outlet),
             ("Modo da pressão de saída", self.outlet_mode),
             ("Vazão", self.flow),
-            ("Referência da vazão", self.flow_ref),
+            ("Unidade da vazão", self.flow_unit),
+            ("Pressão de referência da vazão", self.flow_ref),
+            ("Temperatura normal da vazão", self.normal_temperature),
         ]:
             form.addRow(n, w)
         ll.addLayout(form)
@@ -158,12 +175,18 @@ class CalculationPage(QWidget):
         h.setObjectName("sectionTitle")
         rl.addWidget(h)
         self.points = QTableWidget(0, 2)
+        self.points.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.points.setHorizontalHeaderLabels(["Pressão média (kPa abs)", "k aparente (mD)"])
         self.points.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         rl.addWidget(self.points)
         add = QPushButton("Adicionar resultado atual")
         add.clicked.connect(self._add_point)
         rl.addWidget(add)
+        remove = QPushButton("Remover ponto selecionado")
+        remove.clicked.connect(self._remove_point)
+        rl.addWidget(remove)
+        self.point_count = QLabel("0 pontos utilizados")
+        rl.addWidget(self.point_count)
         kb = QPushButton("Calcular Klinkenberg")
         kb.clicked.connect(self._klinkenberg)
         rl.addWidget(kb)
@@ -211,6 +234,7 @@ class CalculationPage(QWidget):
                 max(0, self.reference.findData(definition.pressure_reference))
             )
             self.gas.setCurrentIndex(max(0, self.gas.findData(definition.gas_type)))
+            self.flow_unit.setCurrentText(definition.flow_unit)
         for widget in (self.save_permeability, self.save_klinkenberg):
             widget.setEnabled(False)
         self.capture_button.setEnabled(bool(definition) and not self._read_only)
@@ -267,6 +291,7 @@ class CalculationPage(QWidget):
             )
         self.inlet.setValue(float(measurement.pressure.value))
         self.flow.setValue(float(measurement.flow.value))
+        self.flow_unit.setCurrentText(measurement.flow.unit)
         self._captured_snapshot = MeasurementSnapshot(
             captured_at=datetime.now(),
             received_at=measurement.received_at,
@@ -290,6 +315,7 @@ class CalculationPage(QWidget):
             communication_state=measurement.communication_state,
             delta_seconds=delta,
             simulated=measurement.simulated,
+            flow_unit=measurement.flow.unit,
         )
         self._captured = True
         self._captured_input_signature = self._input_signature()
@@ -303,7 +329,9 @@ class CalculationPage(QWidget):
             self.inlet.value(),
             self.outlet.value(),
             self.flow.value(),
+            self.flow_unit.currentText(),
             self.flow_ref.value(),
+            self.normal_temperature.value(),
             self.length.value(),
             self.diameter.value(),
             self.temperature.value(),
@@ -327,6 +355,10 @@ class CalculationPage(QWidget):
         )
 
     def _calculate(self):
+        self.last_permeability = None
+        self._calculation_identity = None
+        self._dirty_results.discard("Permeabilidade a gás")
+        self.save_permeability.setEnabled(False)
         try:
             inlet_absolute = absolute_pressure_kpa(
                 self.inlet.value(),
@@ -335,14 +367,33 @@ class CalculationPage(QWidget):
                 self.atmospheric.value(),
             )
             outlet_absolute = self._outlet_absolute()
+            if (
+                self.flow_unit.currentText() == FLOW_PROTOCOL_UNIT
+                and not self.normal_reference_confirmed
+            ):
+                raise ValueError(
+                    "NL/min exige confirmar no equipamento pressão e temperatura normais de referência e registrá-las na configuração"
+                )
+            flow_l_min, flow_reference = flow_for_permeability(
+                self.flow.value(),
+                self.flow_unit.currentText(),
+                measurement_pressure_kpa_abs=self.flow_ref.value(),
+                measurement_temperature_c=self.temperature.value(),
+                normal_pressure_kpa_abs=self.flow_ref.value()
+                if self.flow_unit.currentText() == FLOW_PROTOCOL_UNIT
+                else None,
+                normal_temperature_c=self.normal_temperature.value()
+                if self.flow_unit.currentText() == FLOW_PROTOCOL_UNIT
+                else None,
+            )
             r = calculate_gas_permeability(
-                flow_l_min=self.flow.value(),
+                flow_l_min=flow_l_min,
                 viscosity_upa_s=self.viscosity.value(),
                 length_mm=self.length.value(),
                 diameter_mm=self.diameter.value(),
                 inlet_pressure_kpa_abs=inlet_absolute,
                 outlet_pressure_kpa_abs=outlet_absolute,
-                flow_reference_pressure_kpa_abs=self.flow_ref.value(),
+                flow_reference_pressure_kpa_abs=flow_reference,
             )
             snapshot = self._captured_snapshot
             captured_unchanged = bool(
@@ -362,8 +413,13 @@ class CalculationPage(QWidget):
                 "modo_pressao_saida": self.outlet_mode.currentData(),
                 "atmospheric_pressure_kpa": self.atmospheric.value(),
                 "pressure_reference": self.reference.currentData(),
-                "flow_l_min": self.flow.value(),
-                "flow_reference_pressure_kpa_abs": self.flow_ref.value(),
+                "flow_l_min": flow_l_min,
+                "flow_value": self.flow.value(),
+                "flow_unit": self.flow_unit.currentText(),
+                "flow_reference_pressure_kpa_abs": flow_reference,
+                "flow_reference_temperature_c": self.normal_temperature.value()
+                if self.flow_unit.currentText() == FLOW_PROTOCOL_UNIT
+                else self.temperature.value(),
                 "units": {
                     "temperature": "°C",
                     "viscosity": "µPa·s",
@@ -372,7 +428,7 @@ class CalculationPage(QWidget):
                     "area": "m²",
                     "pressure_entered": self.unit.currentText(),
                     "absolute_pressure": "kPa abs",
-                    "flow": "L/min",
+                    "flow": self.flow_unit.currentText(),
                 },
                 "data_origin": (
                     "leitura_combinada"
@@ -392,6 +448,10 @@ class CalculationPage(QWidget):
                 "formula": "k=2·μ·L·Qref·Pref/[A·(Pin²−Pout²)]",
             }
             self.last_permeability = (inputs, r.as_dict())
+            self._calculation_identity = (
+                snapshot.captured_at if captured_unchanged else None,
+                self._input_signature(),
+            )
             self._dirty_results.add("Permeabilidade a gás")
             self.save_permeability.setEnabled(self.definition is not None and not self._read_only)
             self._rows(
@@ -407,12 +467,34 @@ class CalculationPage(QWidget):
             QMessageBox.warning(self, "Permeabilidade", str(e))
 
     def _add_point(self):
-        if self.last_permeability:
+        if self.last_permeability and self._calculation_identity is not None:
+            identity = self._calculation_identity
+            if identity in self._point_identities:
+                return QMessageBox.information(
+                    self, "Klinkenberg", "Este resultado já foi adicionado"
+                )
             r = self.last_permeability[1]
             row = self.points.rowCount()
             self.points.insertRow(row)
             self.points.setItem(row, 0, QTableWidgetItem(str(r["mean_pressure_kpa_abs"])))
             self.points.setItem(row, 1, QTableWidgetItem(str(r["permeability_md"])))
+            self._point_identities.append(identity)
+            self._points_changed()
+
+    def _remove_point(self):
+        row = self.points.currentRow()
+        if row < 0:
+            return
+        self.points.removeRow(row)
+        self._point_identities.pop(row)
+        self._points_changed()
+
+    def _points_changed(self):
+        self.last_klinkenberg = None
+        self._dirty_results.discard("Klinkenberg")
+        self.save_klinkenberg.setEnabled(False)
+        self.kresult.setRowCount(0)
+        self.point_count.setText(f"{self.points.rowCount()} pontos utilizados")
 
     def _klinkenberg(self):
         try:
@@ -466,7 +548,7 @@ class CalculationPage(QWidget):
             table.setItem(i, 1, QTableWidgetItem(b))
 
     def _save(self, kind, data):
-        if data:
+        if data and (kind != "Klinkenberg" or self.last_klinkenberg is data):
             self.save_requested.emit(kind, *data, "")
 
     def pending_results(self):
@@ -492,6 +574,7 @@ class CalculationPage(QWidget):
         self._captured = False
         self._captured_snapshot = None
         self._captured_input_signature = None
+        self._point_identities.clear()
         self.current_measurement = None
         if hasattr(self, "save_permeability"):
             self.save_permeability.setEnabled(False)
@@ -500,6 +583,7 @@ class CalculationPage(QWidget):
             self.result.setRowCount(0)
             self.kresult.setRowCount(0)
             self.points.setRowCount(0)
+            self.point_count.setText("0 pontos utilizados")
 
     def populate_history(self, rows):
         self.history.setRowCount(0)

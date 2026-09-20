@@ -212,7 +212,7 @@ class ExportService:
             "status_pressao": "Status da pressão",
             "timestamp_vazao": "Data e hora da vazão",
             "vazao_raw": "Vazão bruta (UINT32)",
-            "vazao": f"Vazão ({test['unidade_vazao']})",
+            "vazao": f"Vazão ({test['unidade_vazao'] or 'unidade não registrada'})",
             "vazao_valida": "Vazão válida",
             "status_vazao": "Status da vazão",
             "qualidade": "Qualidade",
@@ -579,8 +579,16 @@ class ExportService:
         return [
             Paragraph("2. Resumo da aquisição", styles["Section"]),
             Paragraph(
-                f"Duração do ensaio: {self._duration(test['duracao_segundos'])} · "
-                f"Medições combinadas: {total}",
+                (
+                    (
+                        f"Tempo ativo de aquisição: {self._duration(test['duracao_segundos'])} · "
+                        f"Tempo pausado: {self._duration(test['duracao_pausada_segundos'])} · "
+                        f"Tempo total decorrido: {self._duration(test['duracao_decorrida_segundos'])} · "
+                        if test["duracao_decorrida_segundos"] is not None
+                        else f"Tempo decorrido legado: {self._duration(test['duracao_segundos'])} · "
+                    )
+                    + f"Medições combinadas: {total}"
+                ),
                 styles["BodyText"],
             ),
             Spacer(1, 2 * mm),
@@ -674,9 +682,11 @@ class ExportService:
             ]
             for index, record in enumerate(permeability, 1):
                 inputs, results = record["inputs"], record["results"]
-                flow = self._first(inputs, "flow_nl_min", "flow_l_min", "flow_used")
+                flow = self._first(inputs, "flow_value", "flow_nl_min", "flow_l_min", "flow_used")
                 flow_unit = (
-                    "NL/min"
+                    str(inputs["flow_unit"])
+                    if inputs.get("flow_unit")
+                    else "NL/min"
                     if inputs.get("flow_nl_min") is not None
                     else str((inputs.get("units") or {}).get("flow") or "L/min")
                 )
@@ -698,6 +708,19 @@ class ExportService:
                     1,
                 )
             )
+            for index, record in enumerate(permeability, 1):
+                inputs = record["inputs"]
+                if inputs.get("flow_unit") == "NL/min":
+                    reference = self._number(inputs.get("flow_reference_pressure_kpa_abs"), 3)
+                    temperature = self._number(inputs.get("flow_reference_temperature_c"), 2)
+                    elements.append(
+                        Paragraph(
+                            f"Ponto {index}: vazão normal referida a {reference} kPa abs e "
+                            f"{temperature} °C; temperatura do ensaio "
+                            f"{self._number(inputs.get('temperatura_c'), 2)} °C.",
+                            styles["BodyText"],
+                        )
+                    )
 
         elements.append(Paragraph("5.1 Resultado do ajuste de Klinkenberg", styles["Subsection"]))
         valid_fit = None
@@ -797,7 +820,7 @@ class ExportService:
             measurements,
             calculations,
             test["unidade_pressao"] or "psi",
-            test["unidade_vazao"] or "NL/min",
+            test["unidade_vazao"] or "não registrada",
         )
         story = self._cover(test, styles, issued)
         story.extend([self._identification(test, styles), Spacer(1, 4 * mm)])

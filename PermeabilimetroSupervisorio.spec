@@ -41,6 +41,7 @@ exe = EXE(
     upx=True,
     console=False,
     icon=str(root / "assets" / "branding" / "ism_app_icon.ico"),
+    version=str(root / "packaging" / "windows_version_info.txt"),
 )
 coll = COLLECT(
     exe,

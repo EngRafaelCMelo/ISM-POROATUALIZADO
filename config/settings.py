@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from core.units import FLOW_PROTOCOL_UNIT
 from core.version import APP_NAME, APP_VERSION
 
 logger = logging.getLogger(__name__)
@@ -242,6 +243,8 @@ class ConfigManager:
         elif float(pressure["limite_inferior"]) >= float(pressure["limite_superior"]):
             errors.append("A faixa de pressão é inválida")
         flow = self.get("flowmeter", {})
+        if self.get("sensores.vazao.unidade") != FLOW_PROTOCOL_UNIT:
+            errors.append(f"A unidade configurada do flowmeter deve ser {FLOW_PROTOCOL_UNIT}")
         required = (
             "porta",
             "baud_rate",

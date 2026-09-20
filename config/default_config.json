@@ -21,6 +21,8 @@
     "tipo_dado": "uint32",
     "ordem_bytes": "big",
     "fator_escala": 0.001,
+    "normal_pressure_kpa_abs": null,
+    "normal_temperature_c": null,
     "timeout_s": 1.5,
     "intervalo_ms": 1000,
     "stale_after_s": 3.0,
@@ -66,11 +68,7 @@
     }
   },
   "calculos": {
-    "volume_camara_amostra_cm3": 50.0,
-    "volume_expansao_cm3": 25.0,
     "pressao_atmosferica_kpa": 101.325,
-    "limite_repetibilidade_percentual": 0.5,
-    "minimo_ciclos_boyle": 3,
     "gas_padrao": "Helio"
   },
   "simulacao": {

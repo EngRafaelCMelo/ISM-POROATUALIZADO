@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
+from core.units import FLOW_PROTOCOL_UNIT
+
 FLOW_SLAVE_ID = 1
 FLOW_FUNCTION = 3
 FLOW_REGISTER = 0x003A
@@ -37,7 +39,13 @@ class ModbusFrameError(ValueError):
 @dataclass(frozen=True, slots=True)
 class FlowFrame:
     raw_uint32: int
-    flow_l_min: float
+    value: float
+    unit: str = FLOW_PROTOCOL_UNIT
+
+    @property
+    def flow_l_min(self) -> float:
+        """Legacy API alias; callers must use ``unit`` to interpret the value."""
+        return self.value
 
 
 def crc16(data: bytes) -> int:
@@ -129,4 +137,4 @@ def parse_flow_response(response: bytes) -> FlowFrame:
             f"Resposta Modbus com {len(response)} bytes, esperados {FLOW_RESPONSE_SIZE}",
         )
     raw = int.from_bytes(response[3:7], byteorder="big", signed=False)
-    return FlowFrame(raw_uint32=raw, flow_l_min=raw / FLOW_SCALE)
+    return FlowFrame(raw_uint32=raw, value=raw / FLOW_SCALE)

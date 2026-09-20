@@ -29,7 +29,7 @@ class Database:
         try:
             yield connection
             connection.commit()
-        except sqlite3.Error:
+        except Exception:
             connection.rollback()
             logger.exception("Falha na transação SQLite")
             raise

@@ -5,6 +5,7 @@ __pycache__/
 build/
 build_*/
 dist/
+artifacts/generated/
 .pio/
 
 data/*.db

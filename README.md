@@ -1,7 +1,7 @@
 # Supervisório ISM – Permeabilímetro
 
 Aplicativo de aquisição, ensaio e relatório para o permeabilímetro ISM.
-Versão do aplicativo: consulte `core/version.py`. Firmware atual: 2.2.0.
+Versão do aplicativo: 2.3.0. Firmware atual: 2.2.0 (independente).
 
 ## Arquitetura de produção
 
@@ -51,13 +51,19 @@ O worker envia somente `03 – Read Holding Registers`:
 - Modbus RTU, slave 1, 9600 baud, 8N1;
 - endereço bruto `0x003A` (58; algumas ferramentas Base Address 1 exibem 59);
 - dois registradores, UINT32 big-endian;
-- `vazao_nl_min = valor_uint32 / 1000.0`;
+- `vazao = valor_uint32 / 1000.0`, com unidade de protocolo `NL/min`;
 - frame de consulta: `01 03 00 3A 00 02 E4 06`;
 - F16 do medidor: 125 ms;
 - intervalo inicial: 1000 ms; timeout permitido: 750–1500 ms.
 
 Não existe comando Modbus de escrita no aplicativo. O parser valida slave,
 função, byte count, tamanho e CRC, incluindo exceções Modbus de cinco bytes.
+
+O cálculo com `NL/min` exige `flowmeter.normal_pressure_kpa_abs` e
+`flowmeter.normal_temperature_c` confirmados no equipamento e registrados no
+JSON de configuração. Ambos vêm `null` de fábrica: não há referência normal
+universal presumida. As unidades e hipóteses estão em
+[docs/arquitetura-e-formulas.md](docs/arquitetura-e-formulas.md).
 
 ## Configuração das portas
 
@@ -112,8 +118,9 @@ pyinstaller --clean --noconfirm PermeabilimetroSupervisorio.spec
 ```
 
 Os testes Qt usam `QT_QPA_PLATFORM=offscreen`. Bancos antigos são migrados de
-forma incremental: campos legados de vazão são apenas fallback de leitura e não
-recebem novas medições. Backups SQLite possuem timestamp e retenção configurável.
+forma incremental (schema 5): campos legados de vazão são apenas fallback de
+leitura e não recebem novas medições. Ensaios antigos mostram a duração como
+tempo decorrido legado. Backups SQLite possuem timestamp e retenção configurável.
 
 ## Relatório final
 
@@ -130,13 +137,22 @@ resolve esses arquivos por `sys._MEIPASS`, sem depender do diretório de trabalh
 Para verificar o PDF pelo executável sem acessar dados do operador:
 
 ```powershell
-dist\PermeabilimetroSupervisorio_v2_2_0\PermeabilimetroSupervisorio_v2_2_0.exe --report-smoke "$env:TEMP\ism-report-smoke"
+dist\PermeabilimetroSupervisorio_v2_3_0\PermeabilimetroSupervisorio_v2_3_0.exe --report-smoke "$env:TEMP\ism-report-smoke"
 ```
 
 Esse diagnóstico usa um banco SQLite temporário e gera um relatório marcado
 como demonstrativo. Não substitui a validação do fluxo real com o equipamento.
 O PDF em `artifacts/final-report` também usa dados fictícios de teste; não
 representa um ensaio realizado em equipamento físico.
+
+## Build de produção para Windows
+
+Execute `powershell -ExecutionPolicy Bypass -File .\build.ps1` em ambiente com
+Python 3.12. O script instala dependências, executa lint, formatação e testes,
+compila o firmware, gera o executável, exercita o PDF e grava ZIP e SHA-256 em
+`dist/`. A futura assinatura Authenticode requer certificado e chave privada:
+em estação controlada, use `signtool sign /fd SHA256 /tr <timestamp> /td SHA256`
+e confirme com `signtool verify /pa`. O build não assina automaticamente.
 
 ## Firmware
 
