@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -25,6 +26,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -135,6 +137,7 @@ class MainWindow(QMainWindow):
         brand.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         brand_name = QLabel("PERMEABILÍMETRO SUPERVISÓRIO")
         brand_name.setObjectName("brandName")
+        brand_name.setWordWrap(True)
         side_layout.addWidget(brand)
         side_layout.addWidget(brand_name)
         side_layout.addSpacing(16)
@@ -211,8 +214,8 @@ class MainWindow(QMainWindow):
         self.equipment_badge = StatusBadge("Aguardando dados", "neutral")
         self.clock_label = QLabel()
         self.user_label = QLabel(f"Usuário: {self.config.get('aplicacao.usuario', 'Operador')}")
-        self.clock_label.setVisible(False)
-        self.user_label.setVisible(False)
+        self.clock_label.setVisible(True)
+        self.user_label.setVisible(True)
         self.user_label.setToolTip(
             f"Operador atual: {self.config.get('aplicacao.usuario', 'Operador')}"
         )
@@ -225,7 +228,7 @@ class MainWindow(QMainWindow):
 
         connection_bar = QFrame()
         connection_bar.setObjectName("connectionBar")
-        connection_layout = QHBoxLayout(connection_bar)
+        connection_layout = QGridLayout(connection_bar)
         connection_layout.setContentsMargins(12, 8, 12, 8)
         self.port_combo = QComboBox()
         self.port_combo.setMinimumWidth(190)
@@ -252,21 +255,23 @@ class MainWindow(QMainWindow):
         self.sim_fault.addItem("Corrente 21,0 mA", "critico_alto")
         self.sim_fault.addItem("Perda de comunicação", "perda")
         self.sim_fault.currentIndexChanged.connect(self._apply_sim_fault)
-        connection_layout.addWidget(QLabel("Porta"))
-        connection_layout.addWidget(self.port_combo)
-        connection_layout.addWidget(refresh_ports)
-        connection_layout.addWidget(QLabel("Baud"))
-        connection_layout.addWidget(self.baud_combo)
-        connection_layout.addWidget(self.connect_button)
-        connection_layout.addWidget(QLabel("Flowmeter"))
-        connection_layout.addWidget(self.flow_port_combo)
-        connection_layout.addWidget(self.flow_connect_button)
-        connection_layout.addStretch()
-        connection_layout.addWidget(self.simulation_button)
-        connection_layout.addWidget(self.sim_fault)
+        connection_layout.addWidget(QLabel("ESP32"), 0, 0)
+        connection_layout.addWidget(self.port_combo, 0, 1)
+        connection_layout.addWidget(refresh_ports, 0, 2)
+        connection_layout.addWidget(QLabel("Baud"), 0, 3)
+        connection_layout.addWidget(self.baud_combo, 0, 4)
+        connection_layout.addWidget(self.connect_button, 0, 5)
+        connection_layout.addWidget(self.simulation_button, 0, 7)
+        connection_layout.addWidget(self.sim_fault, 0, 8)
+        connection_layout.addWidget(QLabel("Flowmeter USB–RS485"), 1, 0)
+        connection_layout.addWidget(self.flow_port_combo, 1, 1, 1, 2)
+        connection_layout.addWidget(self.flow_connect_button, 1, 3, 1, 3)
+        connection_layout.setColumnStretch(6, 1)
         main.addWidget(connection_bar)
 
         self.stack = QStackedWidget()
+        self.stack.setMinimumWidth(0)
+        self.stack.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
         self.overview = OverviewPage(self.config.data["sensores"])
         self.test_page = TestPage()
         self.calculations = CalculationPage(self.config.data)
@@ -296,10 +301,11 @@ class MainWindow(QMainWindow):
         # title bar.  Keep the navigation/header fixed and let the active
         # page scroll instead of clipping its lower controls and labels.
         page_scroll = QScrollArea()
+        self.page_scroll = page_scroll
         page_scroll.setObjectName("pageScroll")
         page_scroll.setWidgetResizable(True)
         page_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        page_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        page_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         page_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         page_scroll.setWidget(self.stack)
         main.addWidget(page_scroll, 1)
@@ -476,6 +482,7 @@ class MainWindow(QMainWindow):
 
     def _on_flowmeter_state(self, connected: bool, message: str) -> None:
         self.flow_connected = connected
+        self.overview.synoptic.set_flow_connection("OK" if connected else "DISCONNECTED")
         self.statusBar().showMessage(message, 5000)
         if connected:
             self.flow_connect_button.setText("Desconectar flowmeter")
@@ -561,6 +568,7 @@ class MainWindow(QMainWindow):
 
     def _on_connection_state(self, connected: bool, message: str) -> None:
         self.connected = connected
+        self.overview.synoptic.set_pressure_connection("OK" if connected else "DISCONNECTED")
         self.acquisition.process_pressure_connection(connected, message)
         self._set_badge(
             self.connection_badge,
@@ -588,6 +596,10 @@ class MainWindow(QMainWindow):
             "SIMULAÇÃO" if active else "MODO REAL", "warn" if active else "info"
         )
         self.overview.simulation_banner.setVisible(active)
+        state = "SIMULATED" if active else "DISCONNECTED"
+        self.overview.synoptic.set_pressure_connection(state)
+        self.overview.synoptic.set_flow_connection(state)
+        self.overview.synoptic.set_test_state("SIMULADO" if active else "AGUARDANDO")
 
     def _on_serial_error(self, message: str) -> None:
         logger.error("Erro serial: %s", message)
@@ -645,6 +657,7 @@ class MainWindow(QMainWindow):
     def _on_flowmeter_statistics(self, statistics: dict) -> None:
         summary = " | ".join(f"{key}: {value}" for key, value in statistics.items())
         self.diagnostics.values["modbus_stats"].setText(summary)
+        self.overview.synoptic.set_diagnostics("flow", **statistics)
 
     def _on_modbus_frame(self, direction: str, frame: str) -> None:
         self.diagnostics.frames.appendPlainText(f"{datetime.now():%H:%M:%S.%f} {direction} {frame}")
@@ -662,6 +675,7 @@ class MainWindow(QMainWindow):
             self.overview.add_alarm(alarm_id, alarm)
             if alarm.severity.value in ("alarme", "crítico"):
                 self._set_badge(self.equipment_badge, alarm.severity.value.capitalize(), "bad")
+                self.overview.synoptic.set_critical_alarm(alarm.severity.value == "crítico")
             elif alarm.severity.value == "atenção":
                 self._set_badge(self.equipment_badge, "Atenção", "warn")
         except Exception:
@@ -714,6 +728,7 @@ class MainWindow(QMainWindow):
             Path(self.config.get("dados.diretorio_exportacao") or self.paths.exports),
             self,
             pressure_unit=str(self.config.get("sensores.pressao.unidade", "psi")),
+            flow_unit=str(self.config.get("flowmeter.unit", "L/min")),
             expected_pressure_range=(
                 f"{self.config.get('sensores.pressao.limite_inferior', 0):g}–"
                 f"{self.config.get('sensores.pressao.limite_superior', 400):g} "
@@ -745,6 +760,9 @@ class MainWindow(QMainWindow):
             self.calculation_test_id = session.id
             self.overview.reset_test()
             self.overview.set_test_active(True)
+            self.overview.synoptic.set_sample(
+                session.definition.code, session.definition.sample_name
+            )
             self.current_test_label.setText(
                 f"{session.definition.code} — {session.definition.sample_name}"
             )
@@ -1158,6 +1176,9 @@ class MainWindow(QMainWindow):
             seconds = int(self.test_service.elapsed_seconds())
             self.overview.duration.setText(
                 f"{seconds // 3600:02d}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}"
+            )
+            self.overview.synoptic.set_runtime(
+                self.overview.duration.text(), self.test_service.current.sample_count
             )
             self.test_page.labels["duration"].setText(self.overview.duration.text())
         frequency = 0.0

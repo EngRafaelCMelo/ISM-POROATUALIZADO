@@ -3,8 +3,9 @@
 O ESP32 envia somente pressão obtida pelo ADS1115. O PC lê o flowmeter por
 USB–RS485 Modbus RTU: 9600 8N1, slave 1, função 03, registro `0x003A`, dois
 registradores UINT32 big-endian e escala `raw/1000`. Não há escrita Modbus.
-O parser marca o valor como `NL/min`; a leitura, a medição e a linha SQLite
-guardam a unidade. Séries legadas sem unidade permanecem sem classificação.
+O parser associa ao valor a unidade (`L/min`, `NL/min` ou `mL/min`) confirmada
+na interface; a leitura, a medição e a linha SQLite guardam essa unidade. Séries
+legadas sem unidade permanecem sem classificação.
 
 `NL/min` é volume de gás referido a pressão absoluta `Pn` e temperatura `Tn`
 confirmadas no flowmeter. O cálculo usa `Qref = Qn × Tensaio/Tn` e `Pref = Pn`.

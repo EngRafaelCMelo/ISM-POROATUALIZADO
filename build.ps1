@@ -37,11 +37,27 @@ if ($SmokeReports.Count -lt 2) { throw 'Os dois relatórios de smoke test estão
 foreach ($SmokeReport in $SmokeReports) {
     Invoke-CheckedPython -c "from pypdf import PdfReader; import sys; r=PdfReader(sys.argv[1]); t=' '.join(p.extract_text() or '' for p in r.pages); assert len(r.pages)>=4; assert len(r.pages[0].images)>=1; assert 'RELATÓRIO FINAL DE ENSAIO' in t; assert 'Resumo da aquisição' in t; assert 'NL/min' in t; assert 'Tempo ativo de aquisição' in t; assert not any(x in t for x in ('NaN','None','flow_l_min'))" $SmokeReport.FullName
 }
+$SmokeArtifactDirectory = Join-Path $PSScriptRoot "artifacts\build-smoke"
+New-Item -ItemType Directory -Force -Path $SmokeArtifactDirectory | Out-Null
+Copy-Item -LiteralPath $SmokeReports.FullName -Destination $SmokeArtifactDirectory -Force
 Invoke-CheckedPython -c "from pypdf import PdfReader; import sys; t=' '.join(p.extract_text() or '' for p in PdfReader(sys.argv[1]).pages); assert 'Pontos utilizados' in t; assert 'Coeficiente R²' in t" (Join-Path $SmokeDirectory 'ENS-PACOTE-KLINKENBERG_relatorio_final.pdf')
 $Archive = Join-Path $PSScriptRoot "dist\$PackageName.zip"
 Compress-Archive -LiteralPath (Join-Path $PSScriptRoot "dist\$PackageName") -DestinationPath $Archive -Force
 $Hash = (Get-FileHash -LiteralPath $Archive -Algorithm SHA256).Hash
 "$Hash  $PackageName.zip" | Set-Content -LiteralPath "$Archive.sha256" -Encoding ascii
+$ExpectedHash = (Get-Content -LiteralPath "$Archive.sha256").Split()[0]
+$VerifiedHash = (Get-FileHash -LiteralPath $Archive -Algorithm SHA256).Hash
+if ($ExpectedHash -ne $VerifiedHash) { throw "SHA-256 divergente após empacotamento." }
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$Zip = [System.IO.Compression.ZipFile]::OpenRead($Archive)
+try {
+    $PackagedExecutable = $Zip.Entries | Where-Object { $_.FullName -like '*.exe' } | Select-Object -First 1
+    if (-not $PackagedExecutable) { throw 'Executável ausente dentro do ZIP.' }
+} finally {
+    $Zip.Dispose()
+}
 Write-Host "Executável: $Executable"
 Write-Host "PDF demonstrativo: $($Report.FullName)"
-Write-Host "Pacote SHA-256: $Archive.sha256"
+Write-Host "PDFs preservados em: $SmokeArtifactDirectory"
+Write-Host "Pacote: $Archive"
+Write-Host "SHA-256: $VerifiedHash"

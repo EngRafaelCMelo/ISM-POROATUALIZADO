@@ -145,6 +145,10 @@ class ConfigManager:
                 if value is not None and not float(lower) <= float(value) <= float(upper):
                     raise ValueError(f"{name} de {key} deve estar dentro da faixa configurada")
         flow = data.get("flowmeter", {})
+        unit = str(flow.get("unit") or sensors.get("vazao", {}).get("unidade", ""))
+        if unit not in {"L/min", "NL/min", "mL/min"}:
+            raise ValueError("A unidade do flowmeter deve ser L/min, NL/min ou mL/min")
+        sensors.setdefault("vazao", {})["unidade"] = unit
         scale = float(flow.get("fator_escala", 0.0))
         if not math.isfinite(scale) or scale <= 0:
             raise ValueError("O fator de escala do flowmeter deve ser positivo e finito")
@@ -243,8 +247,20 @@ class ConfigManager:
         elif float(pressure["limite_inferior"]) >= float(pressure["limite_superior"]):
             errors.append("A faixa de pressão é inválida")
         flow = self.get("flowmeter", {})
-        if self.get("sensores.vazao.unidade") != FLOW_PROTOCOL_UNIT:
-            errors.append(f"A unidade configurada do flowmeter deve ser {FLOW_PROTOCOL_UNIT}")
+        unit = str(flow.get("unit") or self.get("sensores.vazao.unidade", ""))
+        if unit not in {"L/min", FLOW_PROTOCOL_UNIT, "mL/min"}:
+            errors.append("Selecione a unidade fornecida pelo flowmeter")
+        if not flow.get("unit_confirmed"):
+            errors.append("Confirme no manual/equipamento a unidade fornecida pelo flowmeter")
+        if unit == FLOW_PROTOCOL_UNIT:
+            if not flow.get("normal_reference_confirmed"):
+                errors.append("Confirme as referências normalizadas de pressão e temperatura")
+            if flow.get("normal_pressure_kpa_abs") is None:
+                errors.append("Informe a pressão normal absoluta de referência do NL/min")
+            if flow.get("normal_temperature_c") is None:
+                errors.append("Informe a temperatura normal de referência do NL/min")
+        elif flow.get("volume_reference_pressure_kpa_abs") is None:
+            errors.append(f"Informe a pressão absoluta de referência do volume em {unit}")
         required = (
             "porta",
             "baud_rate",

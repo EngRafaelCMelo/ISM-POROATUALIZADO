@@ -103,3 +103,54 @@ def test_legacy_calculation_with_missing_fields_remains_readable(qt_application)
     )
     assert page.history.rowCount() == 1
     assert "10.0" in page.history.item(0, 2).text()
+
+
+def test_klinkenberg_point_identity_belongs_to_calculation_run(qt_application, monkeypatch) -> None:
+    page = CalculationPage(
+        {
+            "calculos": {"pressao_atmosferica_kpa": 101.325},
+            "flowmeter": {
+                "unit": "L/min",
+                "volume_reference_pressure_kpa_abs": 101.325,
+            },
+        }
+    )
+    definition = Definition(
+        code="REP-1",
+        sample_name="Repetição",
+        sample_length_mm=50,
+        sample_diameter_mm=25,
+        pressure_unit="kPa",
+        flow_unit="L/min",
+    )
+    page.set_session(definition)
+    now = datetime.now()
+    page.update_measurement(
+        Measurement(
+            now,
+            pressure=SensorReading(
+                value=200, quality=ReadingQuality.VALID, timestamp=now, unit="kPa"
+            ),
+            flow=SensorReading(value=2, quality=ReadingQuality.VALID, timestamp=now, unit="L/min"),
+            communication_state="OK",
+        )
+    )
+    page.outlet_mode.setCurrentIndex(page.outlet_mode.findData("atmosphere"))
+    page.flow_ref.setValue(101.325)
+    page._capture()
+    monkeypatch.setattr("ui.calculation_page.QMessageBox.information", lambda *args: None)
+    page._calculate()
+    first_identity = page._calculation_identity
+    page._add_point()
+    page._add_point()
+    assert page.points.rowCount() == 1
+    page._calculate()
+    assert page._calculation_identity != first_identity
+    page._add_point()
+    assert page.points.rowCount() == 2
+    page.last_klinkenberg = ({}, {})
+    page.save_klinkenberg.setEnabled(True)
+    page.points.selectRow(0)
+    page._remove_point()
+    assert page.last_klinkenberg is None
+    assert not page.save_klinkenberg.isEnabled()

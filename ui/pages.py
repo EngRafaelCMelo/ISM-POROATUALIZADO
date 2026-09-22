@@ -39,6 +39,7 @@ from core.constants import ReadingQuality
 from core.models import Alarm, Measurement, SensorReading, TestSession
 from ui.resources import branding_path
 from ui.theme import COLORS, icon_path
+from ui.widgets.process_synoptic import ProcessSynoptic
 from ui.widgets.sensor_card import SensorCard
 
 logger = logging.getLogger(__name__)
@@ -80,7 +81,8 @@ class OverviewPage(QWidget):
         self.simulation_banner.hide()
         outer.addWidget(self.simulation_banner)
 
-        cards = QHBoxLayout()
+        # Mantidos como adaptadores compatíveis para telas/testes existentes; o
+        # valor operacional visível agora fica ancorado no próprio instrumento.
         self.cards: dict[str, SensorCard] = {}
         for key in ("pressao", "vazao"):
             cfg = sensor_config[key]
@@ -91,44 +93,30 @@ class OverviewPage(QWidget):
                 float(cfg.get("limite_superior") or 100),
                 int(cfg.get("casas", 2)),
             )
-            cards.addWidget(card)
             self.cards[key] = card
-        outer.addLayout(cards)
 
         lower = QHBoxLayout()
-        plot_card, plot_layout = card_frame()
-        plot_header = QHBoxLayout()
-        title = QLabel("Tendência operacional · últimos 60 segundos")
+        synoptic_card, synoptic_layout = card_frame()
+        synoptic_header = QHBoxLayout()
+        title = QLabel("Processo · caminho do gás")
         title.setObjectName("sectionTitle")
-        clear_plot = QPushButton("Limpar visualização")
-        clear_plot.setObjectName("quiet")
-        clear_plot.setToolTip("Limpa somente o gráfico; os dados do ensaio permanecem gravados")
-        clear_plot.clicked.connect(self.clear_visualization)
-        plot_header.addWidget(title)
-        plot_header.addStretch()
-        plot_header.addWidget(clear_plot)
-        plot_layout.addLayout(plot_header)
-        self.compact_plot = pg.PlotWidget()
-        self.compact_plot.setMinimumHeight(210)
-        self.compact_plot.showGrid(x=True, y=True, alpha=0.15)
-        self.compact_plot.setBackground("w")
-        self.compact_plot.setLabel("bottom", "Tempo", units="s")
-        self.compact_plot.setLabel("left", "Pressão / vazão")
-        self.pressure_curve = self.compact_plot.plot(
-            pen=pg.mkPen(COLORS["pressure"], width=2), name="Pressão"
-        )
-        self.flow_curve = self.compact_plot.plot(
-            pen=pg.mkPen(COLORS["flow"], width=2), name="Vazão"
-        )
-        self.compact_plot.addLegend(offset=(8, 8))
-        plot_layout.addWidget(self.compact_plot)
-        lower.addWidget(plot_card, 2)
+        hint = QLabel("Passe o mouse ou clique nos instrumentos para detalhes")
+        hint.setObjectName("muted")
+        synoptic_header.addWidget(title)
+        synoptic_header.addStretch()
+        synoptic_header.addWidget(hint)
+        synoptic_layout.addLayout(synoptic_header)
+        self.synoptic = ProcessSynoptic()
+        synoptic_layout.addWidget(self.synoptic, 1)
+        lower.addWidget(synoptic_card, 4)
 
         status_card, status_layout = card_frame()
+        status_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         status_title = QLabel("Ensaio")
         status_title.setObjectName("sectionTitle")
         status_layout.addWidget(status_title)
         stats = QGridLayout()
+        stats.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.duration = QLabel("00:00:00")
         self.samples = QLabel("0")
         self.rate = QLabel("— Hz")
@@ -154,7 +142,6 @@ class OverviewPage(QWidget):
             stats.addWidget(value, row * 2 + 1, group * 2)
             stats.setColumnStretch(group * 2, 1)
         status_layout.addLayout(stats)
-        status_layout.addStretch()
         self.start_button = QPushButton("Iniciar ensaio")
         self.start_button.setObjectName("primary")
         self.pause_button = QPushButton("Pausar")
@@ -221,12 +208,12 @@ class OverviewPage(QWidget):
 
     def update_pressure(self, reading: SensorReading) -> None:
         self.cards["pressao"].update_reading(reading)
+        self.synoptic.update_pressure(reading)
         timestamp = reading.timestamp or datetime.now()
         if self._first_time is None:
             self._first_time = timestamp
         self._pressure_times.append((timestamp - self._first_time).total_seconds())
         self._pressure.append(float("nan") if reading.value is None else reading.value)
-        self.pressure_curve.setData(list(self._pressure_times), list(self._pressure))
 
     def update_flow(self, reading: SensorReading) -> None:
         self.cards["vazao"].update_reading(
@@ -235,6 +222,7 @@ class OverviewPage(QWidget):
             if reading.quality == ReadingQuality.DISCONNECTED
             else None,
         )
+        self.synoptic.update_flow(reading)
         timestamp = reading.timestamp
         if timestamp is None:
             return
@@ -242,7 +230,6 @@ class OverviewPage(QWidget):
             self._first_time = timestamp
         self._flow_times.append((timestamp - self._first_time).total_seconds())
         self._flow.append(float("nan") if reading.value is None else reading.value)
-        self.flow_curve.setData(list(self._flow_times), list(self._flow))
 
     def set_test_active(self, active: bool, paused: bool = False) -> None:
         self.start_button.setEnabled(not active)
@@ -251,6 +238,9 @@ class OverviewPage(QWidget):
         self.marker_button.setEnabled(active)
         self.pause_button.setText("Retomar" if paused else "Pausar")
         self.recording.setText("Pausado" if paused else "Gravando" if active else "Aguardando")
+        self.synoptic.set_test_state(
+            "PAUSADO" if paused else "EM EXECUÇÃO" if active else "AGUARDANDO"
+        )
         if not active:
             self.duration.setText("00:00:00")
 
@@ -260,6 +250,7 @@ class OverviewPage(QWidget):
         self.samples.setText("0")
         self._report_ready = False
         self.set_test_active(False)
+        self.synoptic.reset()
 
     def set_report_ready(self, ready: bool) -> None:
         self._report_ready = ready
@@ -270,8 +261,6 @@ class OverviewPage(QWidget):
         self._pressure.clear()
         self._flow.clear()
         self._first_time = None
-        self.pressure_curve.clear()
-        self.flow_curve.clear()
 
     def add_alarm(self, alarm_id: int, alarm: Alarm) -> None:
         row = self.alarm_table.rowCount()
@@ -1226,6 +1215,7 @@ class SettingsPage(QWidget):
 
     def __init__(self, config: dict[str, Any]):
         super().__init__()
+        self.config = config
         layout = QVBoxLayout(self)
         layout.addLayout(page_header("Configurações", "Comunicação, sensores, interface e dados"))
         self.tabs = QTabWidget()
@@ -1289,6 +1279,44 @@ class SettingsPage(QWidget):
         self.modbus_configured = QCheckBox("Parâmetros conferidos no manual")
         self.modbus_configured.setChecked(bool(flow_cfg.get("configurado")))
         modbus_form.addRow("Estado", self.modbus_configured)
+        unit_help = QLabel(
+            "L/min é volume nas condições informadas; NL/min é volume normalizado e exige "
+            "pressão e temperatura normais confirmadas. Não selecione NL/min por suposição."
+        )
+        unit_help.setWordWrap(True)
+        unit_help.setObjectName("warningBanner")
+        modbus_form.addRow(unit_help)
+        self.flow_unit = QComboBox()
+        self.flow_unit.addItems(["L/min", "NL/min", "mL/min"])
+        self.flow_unit.setCurrentText(
+            str(flow_cfg.get("unit") or config["sensores"]["vazao"].get("unidade", "L/min"))
+        )
+        self.flow_unit_confirmed = QCheckBox("Unidade conferida no manual/equipamento")
+        self.flow_unit_confirmed.setChecked(bool(flow_cfg.get("unit_confirmed", False)))
+        self.normal_pressure = QDoubleSpinBox()
+        self.normal_pressure.setRange(0.001, 10000)
+        self.normal_pressure.setDecimals(3)
+        self.normal_pressure.setValue(float(flow_cfg.get("normal_pressure_kpa_abs") or 101.325))
+        self.normal_temperature = QDoubleSpinBox()
+        self.normal_temperature.setRange(-273.14, 1000)
+        self.normal_temperature.setDecimals(2)
+        self.normal_temperature.setValue(float(flow_cfg.get("normal_temperature_c") or 0.0))
+        self.normal_reference_confirmed = QCheckBox("Pressão e temperatura normais conferidas")
+        self.normal_reference_confirmed.setChecked(
+            bool(flow_cfg.get("normal_reference_confirmed", False))
+        )
+        self.volume_reference_pressure = QDoubleSpinBox()
+        self.volume_reference_pressure.setRange(0.001, 10000)
+        self.volume_reference_pressure.setDecimals(3)
+        self.volume_reference_pressure.setValue(
+            float(flow_cfg.get("volume_reference_pressure_kpa_abs") or 101.325)
+        )
+        modbus_form.addRow("Unidade fornecida", self.flow_unit)
+        modbus_form.addRow("Confirmação da unidade", self.flow_unit_confirmed)
+        modbus_form.addRow("Pressão normal (kPa abs)", self.normal_pressure)
+        modbus_form.addRow("Temperatura normal (°C)", self.normal_temperature)
+        modbus_form.addRow("Confirmação das referências", self.normal_reference_confirmed)
+        modbus_form.addRow("Pressão de referência L/min (kPa abs)", self.volume_reference_pressure)
         self.modbus_fields: dict[str, QLineEdit] = {}
         for key, label in [
             ("porta", "Porta USB–RS485"),
@@ -1379,7 +1407,15 @@ class SettingsPage(QWidget):
                 "limite_inferior": float(lower) if lower else None,
                 "limite_superior": float(upper) if upper else None,
             }
-        flow: dict[str, Any] = {"configurado": self.modbus_configured.isChecked()}
+        flow: dict[str, Any] = {
+            "configurado": self.modbus_configured.isChecked(),
+            "unit": self.flow_unit.currentText(),
+            "unit_confirmed": self.flow_unit_confirmed.isChecked(),
+            "normal_pressure_kpa_abs": self.normal_pressure.value(),
+            "normal_temperature_c": self.normal_temperature.value(),
+            "normal_reference_confirmed": self.normal_reference_confirmed.isChecked(),
+            "volume_reference_pressure_kpa_abs": self.volume_reference_pressure.value(),
+        }
         integer_keys = {
             "slave_id",
             "baud_rate",
@@ -1406,6 +1442,7 @@ class SettingsPage(QWidget):
                 "log_frames": self.modbus_log_frames.isChecked(),
             }
         )
+        sensors["vazao"]["unidade"] = self.flow_unit.currentText()
         self.save_requested.emit(
             {
                 "comunicacao": {

@@ -174,7 +174,13 @@ def test_klinkenberg_duplicate_and_invalidation(qt_application, monkeypatch):
 def test_normal_unit_survives_capture_storage_and_exports(qt_application, tmp_path):
     settings = {
         "calculos": {"pressao_atmosferica_kpa": 101.325},
-        "flowmeter": {"normal_pressure_kpa_abs": 101.325, "normal_temperature_c": 0},
+        "flowmeter": {
+            "unit": "NL/min",
+            "unit_confirmed": True,
+            "normal_pressure_kpa_abs": 101.325,
+            "normal_temperature_c": 0,
+            "normal_reference_confirmed": True,
+        },
     }
     page = CalculationPage(settings)
     definition = Definition(

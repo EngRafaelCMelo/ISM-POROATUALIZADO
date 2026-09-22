@@ -104,7 +104,7 @@ def test_start_test_through_main_window_uses_active_mode(tmp_path, monkeypatch) 
         "ACTIVE-1",
         "Amostra",
         pressure_unit="bar",
-        flow_unit="NL/min",
+        flow_unit="L/min",
         sample_length_mm=50,
         sample_diameter_mm=25,
     )
@@ -123,7 +123,7 @@ def test_start_test_through_main_window_uses_active_mode(tmp_path, monkeypatch) 
     assert window.calculations.capture_button.isEnabled()
     assert window.calculations.calculate_button.isEnabled()
     assert window.graphs.pressure_unit == "bar"
-    assert window.graphs.flow_unit == "NL/min"
+    assert window.graphs.flow_unit == "L/min"
     window.test_service.current = None
     window.close()
 

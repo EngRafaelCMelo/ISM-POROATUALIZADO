@@ -4,6 +4,7 @@ import json
 import math
 from datetime import datetime
 from typing import Any
+from uuid import uuid4
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
@@ -124,17 +125,25 @@ class CalculationPage(QWidget):
         self.flow_unit = QComboBox()
         self.flow_unit.addItems([FLOW_PROTOCOL_UNIT, "L/min", "mL/min"])
         self.flow_ref = field(0, 1e6, 5, "kPa abs")
+        flow_cfg = self.config.get("flowmeter", {})
         self.flow_ref.setValue(
-            float(self.config.get("flowmeter", {}).get("normal_pressure_kpa_abs") or 0)
+            float(
+                (
+                    flow_cfg.get("normal_pressure_kpa_abs")
+                    if flow_cfg.get("unit") == FLOW_PROTOCOL_UNIT
+                    else flow_cfg.get("volume_reference_pressure_kpa_abs")
+                )
+                or 0
+            )
         )
         self.normal_temperature = field(-273.15, 300, 2, "°C")
-        self.normal_temperature.setValue(
-            float(self.config.get("flowmeter", {}).get("normal_temperature_c") or 0)
-        )
+        self.normal_temperature.setValue(float(flow_cfg.get("normal_temperature_c") or 0))
         self.normal_reference_confirmed = bool(
-            self.config.get("flowmeter", {}).get("normal_pressure_kpa_abs") is not None
-            and self.config.get("flowmeter", {}).get("normal_temperature_c") is not None
+            flow_cfg.get("normal_reference_confirmed")
+            and flow_cfg.get("normal_pressure_kpa_abs") is not None
+            and flow_cfg.get("normal_temperature_c") is not None
         )
+        self.flow_unit.setCurrentText(str(flow_cfg.get("unit") or "L/min"))
         self.outlet_mode = QComboBox()
         self.outlet_mode.addItem("Informada manualmente", "manual")
         self.outlet_mode.addItem("Fixa configurada", "fixed")
@@ -448,10 +457,8 @@ class CalculationPage(QWidget):
                 "formula": "k=2·μ·L·Qref·Pref/[A·(Pin²−Pout²)]",
             }
             self.last_permeability = (inputs, r.as_dict())
-            self._calculation_identity = (
-                snapshot.captured_at if captured_unchanged else None,
-                self._input_signature(),
-            )
+            # A identidade pertence à execução, não aos valores de entrada.
+            self._calculation_identity = (uuid4().hex,)
             self._dirty_results.add("Permeabilidade a gás")
             self.save_permeability.setEnabled(self.definition is not None and not self._read_only)
             self._rows(

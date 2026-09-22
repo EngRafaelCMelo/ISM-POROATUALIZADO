@@ -51,7 +51,7 @@ O worker envia somente `03 – Read Holding Registers`:
 - Modbus RTU, slave 1, 9600 baud, 8N1;
 - endereço bruto `0x003A` (58; algumas ferramentas Base Address 1 exibem 59);
 - dois registradores, UINT32 big-endian;
-- `vazao = valor_uint32 / 1000.0`, com unidade de protocolo `NL/min`;
+- `vazao = valor_uint32 / 1000.0`; a unidade é selecionada e confirmada na interface;
 - frame de consulta: `01 03 00 3A 00 02 E4 06`;
 - F16 do medidor: 125 ms;
 - intervalo inicial: 1000 ms; timeout permitido: 750–1500 ms.
@@ -59,10 +59,9 @@ O worker envia somente `03 – Read Holding Registers`:
 Não existe comando Modbus de escrita no aplicativo. O parser valida slave,
 função, byte count, tamanho e CRC, incluindo exceções Modbus de cinco bytes.
 
-O cálculo com `NL/min` exige `flowmeter.normal_pressure_kpa_abs` e
-`flowmeter.normal_temperature_c` confirmados no equipamento e registrados no
-JSON de configuração. Ambos vêm `null` de fábrica: não há referência normal
-universal presumida. As unidades e hipóteses estão em
+O cálculo com `NL/min` exige pressão e temperatura normais confirmadas no
+equipamento. `L/min` e `mL/min` registram a pressão absoluta de referência do
+volume. A confirmação é feita na interface, sem editar JSON. As unidades e hipóteses estão em
 [docs/arquitetura-e-formulas.md](docs/arquitetura-e-formulas.md).
 
 ## Configuração das portas
@@ -72,9 +71,9 @@ universal presumida. As unidades e hipóteses estão em
 3. Em **Visão geral**, clique em **Atualizar portas**.
 4. Escolha a porta do ESP32 no primeiro campo e conecte.
 5. Escolha outra porta no campo Flowmeter e conecte.
-6. A faixa operacional exibida para o flowmeter é `5–1000 NL/min`. Ela é
-   referência visual e documental: não exige confirmação manual e não bloqueia
-   o ensaio.
+6. Em **Configurações > Modbus**, selecione `L/min`, `NL/min` ou `mL/min` e
+   confirme a unidade no manual/equipamento. O preflight real bloqueia o ensaio
+   enquanto a unidade e suas referências aplicáveis estiverem pendentes.
 
 VID, PID e número serial são persistidos quando o driver os fornece, permitindo
 reencontrar o dispositivo caso o Windows renumere a COM.

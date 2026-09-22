@@ -44,7 +44,10 @@ class AcquisitionService(QObject):
         self.latest_pressure = SensorReading(
             unit=config["sensores"]["pressao"].get("unidade", "bar")
         )
-        self.latest_flow = SensorReading(unit=FLOW_PROTOCOL_UNIT)
+        self.latest_flow = SensorReading(
+            unit=config.get("flowmeter", {}).get("unit")
+            or config["sensores"]["vazao"].get("unidade", "")
+        )
         self._latest_pressure_meta: Measurement | None = None
         self._dirty = False
         self._flow_stale_announced = False

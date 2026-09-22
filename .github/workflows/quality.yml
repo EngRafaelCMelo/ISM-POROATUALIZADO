@@ -19,37 +19,23 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - run: python -m pip install -r requirements-dev.txt
-      - run: python -m compileall -q app.py communication config core database services ui tests
-      - run: python -m ruff check .
-      - run: python -m ruff format --check .
-      - run: python -m pytest -q -W error::FutureWarning
-      - run: python -m PyInstaller --clean --noconfirm PermeabilimetroSupervisorio.spec
-      - name: Smoke test do executável
+      - name: Build completo de produção
+        shell: pwsh
+        run: .\build.ps1
+      - name: Validar pacote, hash e executável interno
         shell: pwsh
         run: |
-          $exe = Get-ChildItem -LiteralPath dist -Filter '*.exe' -Recurse | Select-Object -First 1
-          if (-not $exe) { throw 'Executável não encontrado em dist.' }
-          $reportDir = Join-Path $env:RUNNER_TEMP 'ism-report-smoke'
-          New-Item -ItemType Directory -Force -Path $reportDir | Out-Null
-          $reportProcess = Start-Process -FilePath $exe.FullName -ArgumentList @('--report-smoke', $reportDir) -PassThru -Wait -WindowStyle Hidden
-          if ($reportProcess.ExitCode -ne 0) { throw "Geração do PDF pelo executável falhou: $($reportProcess.ExitCode)" }
-          $fitProcess = Start-Process -FilePath $exe.FullName -ArgumentList @('--report-smoke-klinkenberg', $reportDir) -PassThru -Wait -WindowStyle Hidden
-          if ($fitProcess.ExitCode -ne 0) { throw "Geração do PDF Klinkenberg falhou: $($fitProcess.ExitCode)" }
-          if (@(Get-ChildItem -LiteralPath $reportDir -Filter '*.pdf').Count -lt 2) { throw 'Faltam relatórios demonstrativos.' }
-          $pdf = Get-ChildItem -LiteralPath $reportDir -Filter '*.pdf' | Select-Object -First 1
-          if (-not $pdf) { throw 'PDF não encontrado após execução do pacote.' }
-          foreach ($report in Get-ChildItem -LiteralPath $reportDir -Filter '*.pdf') {
-            python -c "from pypdf import PdfReader; import sys; r=PdfReader(sys.argv[1]); text=' '.join(p.extract_text() or '' for p in r.pages); assert len(r.pages)>=4; assert len(r.pages[0].images)>=1; assert 'RELATÓRIO DEMONSTRATIVO - DADOS FICTÍCIOS' in text; assert 'Tempo ativo de aquisição' in text; assert 'NL/min' in text; assert not any(x in text for x in ('NaN','None','flow_l_min'))" $report.FullName
-            if ($LASTEXITCODE -ne 0) { throw "PDF inválido: $($report.FullName)" }
+          $zip = Get-ChildItem -LiteralPath dist -Filter '*.zip' | Select-Object -First 1
+          if (-not $zip) { throw 'ZIP de produção ausente.' }
+          $hashFile = Get-Item -LiteralPath "$($zip.FullName).sha256"
+          $expected = (Get-Content -LiteralPath $hashFile.FullName).Split()[0]
+          $actual = (Get-FileHash -LiteralPath $zip.FullName -Algorithm SHA256).Hash
+          if ($expected -ne $actual) { throw "SHA-256 divergente: $expected != $actual" }
+          $extract = Join-Path $env:RUNNER_TEMP 'ism-package-check'
+          Expand-Archive -LiteralPath $zip.FullName -DestinationPath $extract -Force
+          if (-not (Get-ChildItem -LiteralPath $extract -Filter '*.exe' -Recurse)) {
+            throw 'Executável ausente dentro do ZIP.'
           }
-          python -c "from pypdf import PdfReader; import sys; t=' '.join(p.extract_text() or '' for p in PdfReader(sys.argv[1]).pages); assert 'Pontos utilizados' in t; assert 'Coeficiente R²' in t" (Join-Path $reportDir 'ENS-PACOTE-KLINKENBERG_relatorio_final.pdf')
-          if ($LASTEXITCODE -ne 0) { throw 'Ajuste de Klinkenberg ausente do PDF.' }
-          $process = Start-Process -FilePath $exe.FullName -PassThru -WindowStyle Hidden
-          Start-Sleep -Seconds 5
-          if ($process.HasExited) { throw "Executável encerrou com código $($process.ExitCode)." }
-          Stop-Process -Id $process.Id
-          $process.WaitForExit()
       - uses: actions/upload-artifact@v4
         with:
           name: PermeabilimetroSupervisorio-Windows

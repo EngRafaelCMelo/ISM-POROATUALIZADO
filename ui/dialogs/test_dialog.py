@@ -40,6 +40,7 @@ class TestSetupDialog(QDialog):
         parent=None,
         *,
         pressure_unit: str = "psi",
+        flow_unit: str = "L/min",
         expected_pressure_range: str = "0–400 psi",
     ):
         super().__init__(parent)
@@ -69,6 +70,9 @@ class TestSetupDialog(QDialog):
         self.pressure_unit.setCurrentText(pressure_unit)
         self.flow_unit = QComboBox()
         self.flow_unit.addItems(["NL/min", "L/min", "mL/min"])
+        self.flow_unit.setCurrentText(flow_unit)
+        self.flow_unit.setEnabled(False)
+        self.flow_unit.setToolTip("A unidade é confirmada em Configurações > Modbus")
         self.interval = QDoubleSpinBox()
         self.interval.setRange(0.05, 60)
         self.interval.setValue(1.0)
