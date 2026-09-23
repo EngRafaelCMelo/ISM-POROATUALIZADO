@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from html import escape
 from typing import Any
 
 from PySide6.QtCore import QRectF, Qt, QTimer, Signal
@@ -45,12 +46,10 @@ def _state(reading: SensorReading) -> str:
 def _age(reading: SensorReading) -> str:
     seconds = reading.age_seconds()
     if seconds is None:
-        return "sem atualização"
-    if seconds < 2:
-        return "atualizado agora"
+        return "Sem atualização"
     if seconds < 60:
-        return f"há {seconds:.0f} s"
-    return f"há {seconds / 60:.0f} min"
+        return f"Atualizado há {seconds:.1f} s".replace(".", ",")
+    return f"Atualizado há {seconds / 60:.0f} min"
 
 
 class _InstrumentItem(QGraphicsRectItem):
@@ -93,7 +92,7 @@ class ProcessSynoptic(QGraphicsView):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("processSynoptic")
-        self.setMinimumSize(650, 360)
+        self.setMinimumSize(600, 285)
         self.setRenderHints(
             QPainter.RenderHint.Antialiasing
             | QPainter.RenderHint.TextAntialiasing
@@ -102,7 +101,7 @@ class ProcessSynoptic(QGraphicsView):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setFrameShape(QGraphicsView.Shape.NoFrame)
-        self.scene = QGraphicsScene(0, 0, 1000, 560, self)
+        self.scene = QGraphicsScene(self)
         self.setScene(self.scene)
         self._readings = {
             "flow": SensorReading(),
@@ -132,54 +131,63 @@ class ProcessSynoptic(QGraphicsView):
         equipment.setZValue(0)
         self.scene.addItem(equipment)
         path = QPainterPath()
-        path.moveTo(132, 275)
-        path.lineTo(254, 275)
-        path.moveTo(318, 275)
-        path.lineTo(360, 275)
-        path.moveTo(505, 275)
-        path.lineTo(564, 275)
-        path.moveTo(684, 275)
-        path.lineTo(744, 275)
-        path.moveTo(890, 275)
-        path.lineTo(975, 275)
+        path.moveTo(120, 245)
+        path.lineTo(129, 245)
+        path.moveTo(221, 245)
+        path.lineTo(238, 245)
+        path.moveTo(302, 245)
+        path.lineTo(330, 245)
+        path.moveTo(485, 245)
+        path.lineTo(545, 245)
+        path.moveTo(670, 245)
+        path.lineTo(730, 245)
+        path.moveTo(880, 245)
+        path.lineTo(975, 245)
         self.pipe = QGraphicsPathItem(path)
         self.pipe.setZValue(3)
         self.scene.addItem(self.pipe)
         self.flow_arrow = self.scene.addText("▶   ▶   ▶   ▶   ▶")
         self.flow_arrow.setDefaultTextColor(QColor(STATE_COLORS["DISCONNECTED"]))
-        self.flow_arrow.setPos(250, 174)
+        self.flow_arrow.setPos(330, 163)
         self.flow_arrow.setZValue(4)
         self.instruments = {
             "flow": _InstrumentItem(
-                "flow", "VAZÃO", QRectF(330, 27, 220, 115), self.instrument_clicked.emit
+                "flow", "VAZÃO", QRectF(280, 18, 220, 110), self.instrument_clicked.emit
             ),
             "pressure": _InstrumentItem(
-                "pressure", "PRESSÃO", QRectF(565, 27, 220, 115), self.instrument_clicked.emit
+                "pressure", "PRESSÃO", QRectF(510, 18, 220, 110), self.instrument_clicked.emit
             ),
             "sample": _InstrumentItem(
                 "sample",
                 "ENSAIO / AMOSTRA",
-                QRectF(706, 390, 260, 90),
+                QRectF(740, 18, 230, 110),
                 self.instrument_clicked.emit,
             ),
         }
         for item in self.instruments.values():
             self.scene.addItem(item)
-        self.status_text = self.scene.addText("")
-        self.status_text.setDefaultTextColor(QColor("#334155"))
-        self.status_text.setPos(35, 438)
-        self.status_text.setTextWidth(650)
-        self.status_text.setZValue(8)
+        guides = QPainterPath()
+        for x in (407, 607, 840):
+            guides.moveTo(x, 128)
+            guides.lineTo(x, 188)
+        self.guides = QGraphicsPathItem(guides)
+        self.guides.setPen(QPen(QColor("#94A3B8"), 2, Qt.PenStyle.DashLine))
+        self.guides.setZValue(2)
+        self.scene.addItem(self.guides)
+        self.scene.setSceneRect(self.scene.itemsBoundingRect().adjusted(-10, -10, 10, 10))
         self._update_pipe("DISCONNECTED")
-        self._update_status()
+
+    def _fit_scene(self) -> None:
+        """Enquadra somente a área desenhada, com uma margem visual curta."""
+        self.fitInView(self.scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
-        self.fitInView(self.scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+        self._fit_scene()
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
-        self.fitInView(self.scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+        self._fit_scene()
 
     def update_pressure(self, reading: SensorReading) -> None:
         self._readings["pressure"] = reading
@@ -204,9 +212,7 @@ class ProcessSynoptic(QGraphicsView):
         if reading.value is not None:
             decimals = 3 if key == "flow" else 2
             value = f"{reading.value:.{decimals}f} {reading.unit}".replace(".", ",")
-            if not reading.valid:
-                value = f"{value} · último valor"
-        detail = f"{state} · {_age(reading)}"
+        detail = f"{_age(reading)} · {state}"
         self.instruments[key].set_content(title, value, detail, STATE_COLORS[state])
         self.instruments[key].setToolTip(self._tooltip(key, reading))
 
@@ -235,7 +241,6 @@ class ProcessSynoptic(QGraphicsView):
             reading = self._readings["pressure"]
             reading.quality = ReadingQuality.DISCONNECTED
             self.update_pressure(reading)
-        self._update_status()
 
     def set_flow_connection(self, state: str) -> None:
         self._connections["flow"] = state.upper()
@@ -243,12 +248,10 @@ class ProcessSynoptic(QGraphicsView):
             reading = self._readings["flow"]
             reading.quality = ReadingQuality.DISCONNECTED
             self.update_flow(reading)
-        self._update_status()
 
     def set_test_state(self, state: str) -> None:
         self._test_state = state.upper()
         self._update_sample()
-        self._update_status()
 
     def set_sample(self, code: str, name: str) -> None:
         self._sample_code = code or "SEM ENSAIO"
@@ -257,7 +260,6 @@ class ProcessSynoptic(QGraphicsView):
 
     def set_runtime(self, elapsed: str, samples: int) -> None:
         self._elapsed, self._samples = elapsed, samples
-        self._update_status()
 
     def set_diagnostics(self, instrument: str, **values: Any) -> None:
         if instrument in self._diagnostics:
@@ -270,7 +272,6 @@ class ProcessSynoptic(QGraphicsView):
             self.animation_timer.stop()
         else:
             self.update_flow(self._readings["flow"])
-        self._update_status()
 
     def _update_sample(self) -> None:
         color = STATE_COLORS["SIMULATED"] if "SIMUL" in self._test_state else STATE_COLORS["OK"]
@@ -278,22 +279,16 @@ class ProcessSynoptic(QGraphicsView):
             color = STATE_COLORS["DISCONNECTED"]
         elif self._test_state == "PAUSADO":
             color = STATE_COLORS["WARNING"]
-        name = self._sample_name if len(self._sample_name) <= 18 else self._sample_name[:17] + "…"
+        name = self._sample_name if len(self._sample_name) <= 16 else self._sample_name[:15] + "…"
         self.instruments["sample"].set_content(
-            "ENSAIO / AMOSTRA", f"{self._sample_code} · {name}", self._test_state, color, 13
+            "ENSAIO / AMOSTRA",
+            f"{escape(self._sample_code)} · {escape(name)}",
+            self._test_state,
+            color,
+            12,
         )
         self.instruments["sample"].setToolTip(
             f"Ensaio: {self._sample_code}\nAmostra: {self._sample_name}\nSituação: {self._test_state}"
-        )
-
-    def _update_status(self) -> None:
-        alarm = " · ALARME CRÍTICO" if self._critical else ""
-        self.status_text.setHtml(
-            "<div style='font-family:DejaVu Sans;font-size:9pt'>"
-            f"<b>ESP32/ADS1115:</b> {self._connections['pressure']} &nbsp; "
-            f"<b>USB–RS485/Modbus:</b> {self._connections['flow']} &nbsp; "
-            f"<b>Ensaio:</b> {self._test_state} &nbsp; <b>Tempo:</b> {self._elapsed} &nbsp; "
-            f"<b>Medições:</b> {self._samples}<span style='color:#B42318'><b>{alarm}</b></span></div>"
         )
 
     def _update_pipe(self, state: str) -> None:
@@ -331,7 +326,6 @@ class ProcessSynoptic(QGraphicsView):
         self._update_instrument("flow", "VAZÃO")
         self._update_instrument("pressure", "PRESSÃO")
         self._update_sample()
-        self._update_status()
         self._update_pipe("DISCONNECTED")
 
     def closeEvent(self, event) -> None:  # noqa: N802

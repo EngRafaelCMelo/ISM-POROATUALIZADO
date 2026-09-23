@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="560" viewBox="0 0 1000 560">
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="380" viewBox="0 0 1000 380">
   <defs>
     <linearGradient id="steel" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#f8fafc"/><stop offset="1" stop-color="#cbd5e1"/>
@@ -8,37 +8,38 @@
       <stop offset="0" stop-color="#334155"/><stop offset="1" stop-color="#0f172a"/>
     </linearGradient>
   </defs>
-  <rect x="8" y="8" width="984" height="544" rx="18" fill="#f8fafc" stroke="#d8dee6" stroke-width="2"/>
+  <rect x="8" y="8" width="984" height="364" rx="14" fill="#f8fafc" stroke="#d8dee6" stroke-width="2"/>
   <g stroke="#334155" stroke-width="4" fill="url(#steel)">
-    <rect x="38" y="213" width="94" height="124" rx="14"/>
-    <path d="M58 213v-28h54v28M65 184v-20h40v20"/>
-    <circle cx="180" cy="275" r="53"/>
-    <circle cx="180" cy="275" r="39" fill="#fff"/>
-    <path d="M180 275l25-22" stroke="#c93c37" stroke-width="5"/>
-    <circle cx="180" cy="275" r="5" fill="#334155"/>
-    <path d="M286 242l32 33-32 33-32-33z"/>
-    <path d="M286 242v-30m-21 0h42"/>
-    <rect x="360" y="207" width="145" height="136" rx="13" fill="url(#dark)"/>
-    <rect x="385" y="228" width="95" height="55" rx="6" fill="#0b2235" stroke="#58b719"/>
-    <path d="M398 308h69M409 320h47" stroke="#94a3b8"/>
-    <rect x="564" y="210" width="120" height="130" rx="12"/>
-    <rect x="586" y="229" width="76" height="51" rx="5" fill="#123d63"/>
-    <circle cx="598" cy="308" r="7" fill="#58b719"/>
-    <circle cx="625" cy="308" r="7" fill="#d97706"/>
-    <circle cx="652" cy="308" r="7" fill="#c93c37"/>
-    <rect x="744" y="223" width="146" height="104" rx="8" fill="url(#dark)"/>
-    <circle cx="744" cy="275" r="62"/>
-    <circle cx="890" cy="275" r="62"/>
-    <rect x="760" y="239" width="114" height="72" rx="28" fill="#111827"/>
-    <path d="M724 345h186M751 345v29m132-29v29"/>
+    <rect x="35" y="197" width="85" height="106" rx="12"/>
+    <path d="M53 197v-24h49v24M60 173v-17h35v17"/>
+    <circle cx="175" cy="245" r="46"/>
+    <circle cx="175" cy="245" r="33" fill="#fff"/>
+    <path d="M175 245l22-19" stroke="#c93c37" stroke-width="5"/>
+    <circle cx="175" cy="245" r="5" fill="#334155"/>
+    <path d="M270 213l32 32-32 32-32-32z"/>
+    <path d="M270 213v-28m-20 0h40"/>
+    <rect x="330" y="190" width="155" height="110" rx="12" fill="url(#dark)"/>
+    <rect x="357" y="208" width="101" height="47" rx="6" fill="#0b2235" stroke="#58b719"/>
+    <path d="M370 272h75M382 284h51" stroke="#94a3b8"/>
+    <rect x="545" y="192" width="125" height="106" rx="12"/>
+    <rect x="568" y="210" width="79" height="45" rx="5" fill="#123d63"/>
+    <circle cx="579" cy="274" r="6" fill="#58b719"/>
+    <circle cx="607" cy="274" r="6" fill="#d97706"/>
+    <circle cx="635" cy="274" r="6" fill="#c93c37"/>
+    <rect x="730" y="202" width="150" height="86" rx="8" fill="url(#dark)"/>
+    <circle cx="730" cy="245" r="53"/>
+    <circle cx="880" cy="245" r="53"/>
+    <rect x="746" y="214" width="118" height="62" rx="26" fill="#111827"/>
+    <path d="M712 307h186M742 307v24m126-24v24"/>
   </g>
-  <g fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="700" text-anchor="middle">
-    <text x="78" y="365">FONTE DE GÁS</text>
-    <text x="190" y="365">REGULADOR</text>
-    <text x="286" y="365">VÁLVULA</text>
-    <text x="432" y="365">FLOWMETER</text>
-    <text x="624" y="365">TRANSDUTOR</text>
-    <text x="817" y="382">PORTA-AMOSTRA</text>
-    <text x="951" y="280">SAÍDA</text>
+  <g fill="#475569" font-family="DejaVu Sans, sans-serif" font-size="14" font-weight="700" text-anchor="middle">
+    <text x="77" y="341">FONTE DE</text>
+    <text x="77" y="358">GÁS</text>
+    <text x="175" y="350">REGULADOR</text>
+    <text x="270" y="350">VÁLVULA</text>
+    <text x="407" y="350">FLOWMETER</text>
+    <text x="607" y="350">TRANSDUTOR</text>
+    <text x="805" y="350">PORTA-AMOSTRA</text>
+    <text x="978" y="250" text-anchor="end">SAÍDA</text>
   </g>
 </svg>

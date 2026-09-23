@@ -18,8 +18,8 @@ from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import QApplication
 
 from config.settings import AppPaths, ConfigManager
-from core.constants import ReadingQuality
-from core.models import SensorReading
+from core.constants import ReadingQuality, Severity
+from core.models import Alarm, SensorReading
 from database.database import Database
 from ui.main_window import MainWindow
 from ui.pages import OverviewPage
@@ -39,10 +39,17 @@ def reading(value, unit, quality, *, age=0, status="OK") -> SensorReading:
     )
 
 
-def configure(page: OverviewPage, state: str) -> None:
+def configure(window: MainWindow, state: str) -> None:
+    page: OverviewPage = window.overview
     page.reset_test()
+    page.alarm_table.setRowCount(0)
+    page._update_alarm_summary()
     page.simulation_banner.hide()
     synoptic = page.synoptic
+    window.simulating = False
+    window.connected = state != "sem-conexao"
+    window.flow_connected = state not in {"sem-conexao", "flowmeter-desconectado"}
+    window._update_connection_summary()
     if state == "sem-conexao":
         return
     synoptic.set_pressure_connection("OK")
@@ -68,6 +75,8 @@ def configure(page: OverviewPage, state: str) -> None:
         )
         synoptic.set_flow_connection("DISCONNECTED")
     elif state == "simulacao":
+        window.simulating = True
+        window._update_connection_summary()
         page.simulation_banner.show()
         page.update_pressure(reading(125.4, "psi", ReadingQuality.SIMULATED))
         page.update_flow(reading(64.051, "L/min", ReadingQuality.SIMULATED))
@@ -75,6 +84,17 @@ def configure(page: OverviewPage, state: str) -> None:
     elif state == "alarme-critico":
         page.update_pressure(reading(400.0, "psi", ReadingQuality.INVALID, status="CRITICAL"))
         synoptic.set_critical_alarm(True)
+        page.add_alarm(
+            1,
+            Alarm(
+                datetime.now(),
+                "Pressão",
+                Severity.CRITICAL,
+                "limite",
+                "Pressão acima do limite operacional",
+                400.0,
+            ),
+        )
 
 
 def main() -> int:
@@ -110,7 +130,7 @@ def main() -> int:
         window = MainWindow(config, database, paths)
         for width, height in ((1366, 768), (1600, 900), (1920, 1080)):
             for state in states:
-                configure(window.overview, state)
+                configure(window, state)
                 if state == "simulacao":
                     window.mode_badge.set_state("SIMULAÇÃO", "warn")
                     window.connection_badge.set_state("Simulação ativa", "warn")

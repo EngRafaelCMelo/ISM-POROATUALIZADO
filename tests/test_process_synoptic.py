@@ -62,7 +62,9 @@ def test_synoptic_flow_animation_starts_and_stops(qt_application) -> None:
         )
     )
     assert not widget.animation_running
-    assert "último valor" in widget.instruments["flow"].text.toPlainText()
+    text = widget.instruments["flow"].text.toPlainText()
+    assert "64,051 L/min" in text
+    assert "DISCONNECTED" in text
 
 
 def test_synoptic_resize_sample_test_and_reset(qt_application) -> None:
@@ -77,7 +79,8 @@ def test_synoptic_resize_sample_test_and_reset(qt_application) -> None:
     widget.set_runtime("00:12:34", 321)
     assert "ENS-42" in widget.instruments["sample"].text.toPlainText()
     assert "PAUSADO" in widget.instruments["sample"].text.toPlainText()
-    assert "321" in widget.status_text.toPlainText()
+    assert widget._samples == 321
+    assert not hasattr(widget, "status_text")
     widget.reset()
     assert "SEM ENSAIO" in widget.instruments["sample"].text.toPlainText()
     assert not widget.animation_running

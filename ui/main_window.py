@@ -109,7 +109,7 @@ class MainWindow(QMainWindow):
         self._setup_timers()
         self.setWindowTitle(APP_NAME)
         self.resize(1500, 920)
-        self.setMinimumSize(1180, 700)
+        self.setMinimumSize(960, 600)
 
     def _build_ui(self) -> None:
         root = QWidget()
@@ -211,6 +211,7 @@ class MainWindow(QMainWindow):
         top_layout.addStretch()
         self.mode_badge = StatusBadge("MODO REAL", "info")
         self.connection_badge = StatusBadge("Desconectado", "neutral")
+        self.connection_badge.hide()  # Estado detalhado pertence à faixa Conexões.
         self.equipment_badge = StatusBadge("Aguardando dados", "neutral")
         self.clock_label = QLabel()
         self.user_label = QLabel(f"Usuário: {self.config.get('aplicacao.usuario', 'Operador')}")
@@ -220,7 +221,6 @@ class MainWindow(QMainWindow):
             f"Operador atual: {self.config.get('aplicacao.usuario', 'Operador')}"
         )
         top_layout.addWidget(self.mode_badge)
-        top_layout.addWidget(self.connection_badge)
         top_layout.addWidget(self.equipment_badge)
         top_layout.addWidget(self.clock_label)
         top_layout.addWidget(self.user_label)
@@ -228,15 +228,36 @@ class MainWindow(QMainWindow):
 
         connection_bar = QFrame()
         connection_bar.setObjectName("connectionBar")
-        connection_layout = QGridLayout(connection_bar)
-        connection_layout.setContentsMargins(12, 8, 12, 8)
+        connection_layout = QVBoxLayout(connection_bar)
+        connection_layout.setContentsMargins(12, 6, 12, 6)
+        connection_layout.setSpacing(6)
+        connection_summary = QHBoxLayout()
+        connection_title = QLabel("Conexões")
+        connection_title.setObjectName("sectionTitle")
+        self.esp32_connection_badge = StatusBadge("ESP32: Desconectado", "neutral")
+        self.flow_connection_badge = StatusBadge("Flowmeter: Desconectado", "neutral")
+        self.connection_expand_button = QPushButton("Configurar")
+        self.connection_expand_button.setObjectName("quiet")
+        self.connection_expand_button.setCheckable(True)
+        connection_summary.addWidget(connection_title)
+        connection_summary.addWidget(self.esp32_connection_badge)
+        connection_summary.addWidget(self.flow_connection_badge)
+        connection_summary.addStretch()
+        connection_summary.addWidget(self.connection_expand_button)
+        connection_layout.addLayout(connection_summary)
+
+        self.connection_details = QWidget()
+        details_layout = QGridLayout(self.connection_details)
+        details_layout.setContentsMargins(0, 2, 0, 2)
+        details_layout.setHorizontalSpacing(8)
+        details_layout.setVerticalSpacing(6)
         self.port_combo = QComboBox()
         self.port_combo.setMinimumWidth(190)
         self.baud_combo = QComboBox()
         self.baud_combo.addItems(["9600", "19200", "38400", "57600", "115200", "230400"])
         self.baud_combo.setCurrentText(str(self.config.get("comunicacao.baud_rate", 115200)))
-        refresh_ports = QPushButton("Atualizar portas")
-        refresh_ports.clicked.connect(self._refresh_ports)
+        self.refresh_ports_button = QPushButton("Atualizar portas")
+        self.refresh_ports_button.clicked.connect(self._refresh_ports)
         self.connect_button = QPushButton("Conectar")
         self.connect_button.setObjectName("primary")
         self.connect_button.setIcon(QIcon(icon_path("connect")))
@@ -255,23 +276,27 @@ class MainWindow(QMainWindow):
         self.sim_fault.addItem("Corrente 21,0 mA", "critico_alto")
         self.sim_fault.addItem("Perda de comunicação", "perda")
         self.sim_fault.currentIndexChanged.connect(self._apply_sim_fault)
-        connection_layout.addWidget(QLabel("ESP32"), 0, 0)
-        connection_layout.addWidget(self.port_combo, 0, 1)
-        connection_layout.addWidget(refresh_ports, 0, 2)
-        connection_layout.addWidget(QLabel("Baud"), 0, 3)
-        connection_layout.addWidget(self.baud_combo, 0, 4)
-        connection_layout.addWidget(self.connect_button, 0, 5)
-        connection_layout.addWidget(self.simulation_button, 0, 7)
-        connection_layout.addWidget(self.sim_fault, 0, 8)
-        connection_layout.addWidget(QLabel("Flowmeter USB–RS485"), 1, 0)
-        connection_layout.addWidget(self.flow_port_combo, 1, 1, 1, 2)
-        connection_layout.addWidget(self.flow_connect_button, 1, 3, 1, 3)
-        connection_layout.setColumnStretch(6, 1)
+        details_layout.addWidget(QLabel("ESP32"), 0, 0)
+        details_layout.addWidget(self.port_combo, 0, 1)
+        details_layout.addWidget(QLabel("Baud"), 0, 2)
+        details_layout.addWidget(self.baud_combo, 0, 3)
+        details_layout.addWidget(self.connect_button, 0, 4)
+        details_layout.addWidget(QLabel("Flowmeter USB–RS485"), 1, 0)
+        details_layout.addWidget(self.flow_port_combo, 1, 1, 1, 3)
+        details_layout.addWidget(self.flow_connect_button, 1, 4)
+        details_layout.addWidget(self.refresh_ports_button, 2, 1)
+        details_layout.addWidget(self.simulation_button, 2, 3)
+        details_layout.addWidget(self.sim_fault, 2, 4)
+        details_layout.setColumnStretch(1, 2)
+        details_layout.setColumnStretch(3, 1)
+        connection_layout.addWidget(self.connection_details)
+        self.connection_details.hide()
+        self.connection_expand_button.toggled.connect(self._toggle_connection_details)
         main.addWidget(connection_bar)
 
         self.stack = QStackedWidget()
         self.stack.setMinimumWidth(0)
-        self.stack.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
+        self.stack.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self.overview = OverviewPage(self.config.data["sensores"])
         self.test_page = TestPage()
         self.calculations = CalculationPage(self.config.data)
@@ -297,9 +322,8 @@ class MainWindow(QMainWindow):
             self.about,
         ):
             self.stack.addWidget(page)
-        # A 1360x728 display leaves less vertical space after the Windows
-        # title bar.  Keep the navigation/header fixed and let the active
-        # page scroll instead of clipping its lower controls and labels.
+        # As páginas extensas continuam roláveis; a visão geral foi dimensionada
+        # para caber integralmente em 1366×768 com esta faixa recolhida.
         page_scroll = QScrollArea()
         self.page_scroll = page_scroll
         page_scroll.setObjectName("pageScroll")
@@ -309,6 +333,10 @@ class MainWindow(QMainWindow):
         page_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         page_scroll.setWidget(self.stack)
         main.addWidget(page_scroll, 1)
+
+    def _toggle_connection_details(self, expanded: bool) -> None:
+        self.connection_details.setVisible(expanded)
+        self.connection_expand_button.setText("Recolher" if expanded else "Configurar")
 
     def _connect_signals(self) -> None:
         for page in (self.overview, self.test_page):
@@ -387,6 +415,27 @@ class MainWindow(QMainWindow):
         )
         label.style().unpolish(label)
         label.style().polish(label)
+
+    def _update_connection_summary(self) -> None:
+        if self.simulating:
+            self.esp32_connection_badge.set_state("ESP32: Simulado", "warn")
+            self.flow_connection_badge.set_state("Flowmeter: Simulado", "warn")
+            self.equipment_badge.set_state("Sistema em simulação", "warn")
+            return
+        self.esp32_connection_badge.set_state(
+            f"ESP32: {'Conectado' if self.connected else 'Desconectado'}",
+            "good" if self.connected else "neutral",
+        )
+        self.flow_connection_badge.set_state(
+            f"Flowmeter: {'Conectado' if self.flow_connected else 'Desconectado'}",
+            "good" if self.flow_connected else "neutral",
+        )
+        if self.connected and self.flow_connected:
+            self.equipment_badge.set_state("Sistema conectado", "good")
+        elif self.connected or self.flow_connected:
+            self.equipment_badge.set_state("Conexão parcial", "warn")
+        else:
+            self.equipment_badge.set_state("Sistema desconectado", "neutral")
 
     def _refresh_ports(self) -> None:
         selected = self.port_combo.currentData()
@@ -479,10 +528,12 @@ class MainWindow(QMainWindow):
         self.flow_connected = False
         self.acquisition.process_flow_error("SEM_COMUNICACAO")
         self.flow_connect_button.setText("Conectar flowmeter")
+        self._update_connection_summary()
 
     def _on_flowmeter_state(self, connected: bool, message: str) -> None:
         self.flow_connected = connected
         self.overview.synoptic.set_flow_connection("OK" if connected else "DISCONNECTED")
+        self._update_connection_summary()
         self.statusBar().showMessage(message, 5000)
         if connected:
             self.flow_connect_button.setText("Desconectar flowmeter")
@@ -555,6 +606,7 @@ class MainWindow(QMainWindow):
         self.simulating = False
         self.simulation_button.setText("Iniciar simulação")
         self.overview.simulation_banner.hide()
+        self._update_connection_summary()
 
     def _apply_sim_fault(self) -> None:
         if not self.simulator:
@@ -578,6 +630,7 @@ class MainWindow(QMainWindow):
         self.diagnostics.values["connection"].setText(message)
         self.diagnostics.values["mode"].setText("Real")
         self.mode_badge.set_state("MODO REAL", "info")
+        self._update_connection_summary()
         if not connected:
             self.connect_button.setText("Conectar")
 
@@ -600,6 +653,7 @@ class MainWindow(QMainWindow):
         self.overview.synoptic.set_pressure_connection(state)
         self.overview.synoptic.set_flow_connection(state)
         self.overview.synoptic.set_test_state("SIMULADO" if active else "AGUARDANDO")
+        self._update_connection_summary()
 
     def _on_serial_error(self, message: str) -> None:
         logger.error("Erro serial: %s", message)

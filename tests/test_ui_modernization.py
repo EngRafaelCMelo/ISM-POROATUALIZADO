@@ -48,8 +48,29 @@ def test_layout_keeps_primary_controls_visible_at_supported_sizes(tmp_path) -> N
         app.processEvents()
         assert window.overview.start_button.isVisible()
         assert window.overview.finish_button.isVisible()
-        assert window.connect_button.isVisible()
+        assert window.connection_expand_button.isVisible()
+        assert window.esp32_connection_badge.isVisible()
+        assert window.flow_connection_badge.isVisible()
         assert window.stack.geometry().width() > 800
+        assert not window.page_scroll.verticalScrollBar().isVisible()
+    window.connection_expand_button.setChecked(True)
+    app.processEvents()
+    assert window.connect_button.isVisible()
+    window.close()
+
+
+def test_overview_uses_compact_collapsible_sections(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    window = build_window(tmp_path)
+    window.show()
+    app.processEvents()
+
+    assert not window.connection_details.isVisible()
+    assert not window.overview.alarm_table.isVisible()
+    assert window.overview.alarm_summary.text() == "Nenhum alarme ativo"
+    scene = window.overview.synoptic.scene.sceneRect()
+    assert scene.width() <= 1025
+    assert scene.height() <= 405
     window.close()
 
 

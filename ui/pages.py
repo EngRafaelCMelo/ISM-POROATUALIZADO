@@ -75,7 +75,8 @@ class OverviewPage(QWidget):
     def __init__(self, sensor_config: dict[str, dict[str, Any]]):
         super().__init__()
         outer = QVBoxLayout(self)
-        outer.addLayout(page_header("Visão geral", "Leituras instantâneas e estado do ensaio"))
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(8)
         self.simulation_banner = QLabel("MODO SIMULAÇÃO — dados não provenientes do equipamento")
         self.simulation_banner.setObjectName("simulationBanner")
         self.simulation_banner.hide()
@@ -95,8 +96,9 @@ class OverviewPage(QWidget):
             )
             self.cards[key] = card
 
-        lower = QHBoxLayout()
         synoptic_card, synoptic_layout = card_frame()
+        synoptic_layout.setContentsMargins(14, 10, 14, 10)
+        synoptic_layout.setSpacing(6)
         synoptic_header = QHBoxLayout()
         title = QLabel("Processo · caminho do gás")
         title.setObjectName("sectionTitle")
@@ -108,19 +110,29 @@ class OverviewPage(QWidget):
         synoptic_layout.addLayout(synoptic_header)
         self.synoptic = ProcessSynoptic()
         synoptic_layout.addWidget(self.synoptic, 1)
-        lower.addWidget(synoptic_card, 4)
+        outer.addWidget(synoptic_card, 1)
 
         status_card, status_layout = card_frame()
-        status_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        status_layout.setContentsMargins(14, 9, 14, 9)
+        status_layout.setSpacing(6)
         status_title = QLabel("Ensaio")
         status_title.setObjectName("sectionTitle")
-        status_layout.addWidget(status_title)
+        status_head = QHBoxLayout()
+        status_head.addWidget(status_title)
+        status_head.addStretch()
+        self.test_state_label = QLabel("Aguardando")
+        self.test_state_label.setObjectName("pillNeutral")
+        status_head.addWidget(self.test_state_label)
+        status_layout.addLayout(status_head)
         stats = QGridLayout()
-        stats.setAlignment(Qt.AlignmentFlag.AlignTop)
+        stats.setHorizontalSpacing(16)
+        stats.setVerticalSpacing(2)
         self.duration = QLabel("00:00:00")
         self.samples = QLabel("0")
         self.rate = QLabel("— Hz")
         self.recording = QLabel("Aguardando")
+        # Compatibilidade com integrações antigas; a fonte é única e não precisa
+        # ocupar espaço no resumo operacional.
         self.active_flow = QLabel("Flow meter único")
         self.valid_count = QLabel("0")
         self.invalid_count = QLabel("0")
@@ -130,17 +142,22 @@ class OverviewPage(QWidget):
                 ("Amostras", self.samples),
                 ("Taxa real", self.rate),
                 ("Registro", self.recording),
-                ("Sensor de vazão", self.active_flow),
                 ("Leituras válidas", self.valid_count),
                 ("Leituras inválidas", self.invalid_count),
             ]
         ):
+            metric = QWidget()
+            metric.setObjectName("testMetric")
+            metric_layout = QVBoxLayout(metric)
+            metric_layout.setContentsMargins(0, 0, 0, 0)
+            metric_layout.setSpacing(0)
             name = QLabel(label)
-            name.setObjectName("muted")
-            row, group = divmod(i, 2)
-            stats.addWidget(name, row * 2, group * 2)
-            stats.addWidget(value, row * 2 + 1, group * 2)
-            stats.setColumnStretch(group * 2, 1)
+            name.setObjectName("metricLabel")
+            value.setObjectName("metricValue")
+            metric_layout.addWidget(name)
+            metric_layout.addWidget(value)
+            stats.addWidget(metric, 0, i)
+            stats.setColumnStretch(i, 1)
         status_layout.addLayout(stats)
         self.start_button = QPushButton("Iniciar ensaio")
         self.start_button.setObjectName("primary")
@@ -159,28 +176,40 @@ class OverviewPage(QWidget):
             self.marker_button,
         ):
             button.setIconSize(QSize(17, 17))
+            button.setMinimumWidth(138)
         self.start_button.clicked.connect(self.start_requested)
         self.pause_button.clicked.connect(self.pause_requested)
         self.finish_button.clicked.connect(self.finish_requested)
         self.marker_button.clicked.connect(self.marker_requested)
-        actions = QGridLayout()
-        actions.addWidget(self.start_button, 0, 0)
-        actions.addWidget(self.pause_button, 0, 1)
-        actions.addWidget(self.marker_button, 1, 0)
-        actions.addWidget(self.finish_button, 1, 1)
+        actions = QHBoxLayout()
+        actions.setSpacing(8)
+        actions.addStretch()
+        actions.addWidget(self.start_button)
+        actions.addWidget(self.pause_button)
+        actions.addWidget(self.marker_button)
+        actions.addWidget(self.finish_button)
         status_layout.addLayout(actions)
         self.set_test_active(False)
-        lower.addWidget(status_card, 1)
-        outer.addLayout(lower)
+        outer.addWidget(status_card)
 
         alarms_card, alarms_layout = card_frame()
+        alarms_layout.setContentsMargins(14, 7, 14, 7)
+        alarms_layout.setSpacing(6)
         alarm_head = QHBoxLayout()
-        alarm_title = QLabel("Alarmes ativos")
+        alarm_title = QLabel("Alarmes")
         alarm_title.setObjectName("sectionTitle")
+        self.alarm_summary = QLabel("Nenhum alarme ativo")
+        self.alarm_summary.setObjectName("alarmSummary")
+        self.alarm_details_button = QPushButton("Ver detalhes")
+        self.alarm_details_button.setObjectName("quiet")
+        self.alarm_details_button.setCheckable(True)
+        self.alarm_details_button.setEnabled(False)
+        self.alarm_details_button.toggled.connect(self._toggle_alarm_details)
         self.ack_button = QPushButton("Reconhecer selecionado")
         self.ack_button.clicked.connect(self._ack_selected)
         alarm_head.addWidget(alarm_title)
-        alarm_head.addStretch()
+        alarm_head.addWidget(self.alarm_summary, 1)
+        alarm_head.addWidget(self.alarm_details_button)
         alarm_head.addWidget(self.ack_button)
         alarms_layout.addLayout(alarm_head)
         self.alarm_table = QTableWidget(0, 5)
@@ -190,7 +219,9 @@ class OverviewPage(QWidget):
         self.alarm_table.setColumnHidden(0, True)
         self.alarm_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
         self.alarm_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.alarm_table.setMaximumHeight(145)
+        self.alarm_table.setMaximumHeight(120)
+        self.alarm_table.hide()
+        self.ack_button.hide()
         alarms_layout.addWidget(self.alarm_table)
         outer.addWidget(alarms_card)
 
@@ -238,6 +269,14 @@ class OverviewPage(QWidget):
         self.marker_button.setEnabled(active)
         self.pause_button.setText("Retomar" if paused else "Pausar")
         self.recording.setText("Pausado" if paused else "Gravando" if active else "Aguardando")
+        self.test_state_label.setText(
+            "Pausado" if paused else "Em andamento" if active else "Aguardando"
+        )
+        self.test_state_label.setObjectName(
+            "pillWarn" if paused else "pillGood" if active else "pillNeutral"
+        )
+        self.test_state_label.style().unpolish(self.test_state_label)
+        self.test_state_label.style().polish(self.test_state_label)
         self.synoptic.set_test_state(
             "PAUSADO" if paused else "EM EXECUÇÃO" if active else "AGUARDANDO"
         )
@@ -278,12 +317,42 @@ class OverviewPage(QWidget):
             if alarm.severity.value in ("alarme", "crítico"):
                 item.setForeground(QColor(COLORS["error"]))
             self.alarm_table.setItem(row, col, item)
+        self._update_alarm_summary()
+
+    def _toggle_alarm_details(self, expanded: bool) -> None:
+        self.alarm_table.setVisible(expanded)
+        self.ack_button.setVisible(expanded)
+        self.alarm_details_button.setText("Ocultar detalhes" if expanded else "Ver detalhes")
+
+    def _update_alarm_summary(self) -> None:
+        count = self.alarm_table.rowCount()
+        self.alarm_details_button.setEnabled(count > 0)
+        if not count:
+            self.alarm_summary.setText("Nenhum alarme ativo")
+            self.alarm_summary.setProperty("severity", "normal")
+            self.alarm_summary.style().unpolish(self.alarm_summary)
+            self.alarm_summary.style().polish(self.alarm_summary)
+            self.alarm_details_button.setChecked(False)
+            return
+        severities = [
+            self.alarm_table.item(row, 3).text() for row in range(self.alarm_table.rowCount())
+        ]
+        order = {"crítico": 3, "alarme": 2, "atenção": 1}
+        greatest = max(severities, key=lambda value: order.get(value.lower(), 0))
+        latest = self.alarm_table.item(count - 1, 4).text()
+        self.alarm_summary.setText(f"{count} ativo(s) · {greatest.capitalize()} · {latest}")
+        self.alarm_summary.setProperty(
+            "severity", "critical" if greatest.lower() in {"crítico", "alarme"} else "warning"
+        )
+        self.alarm_summary.style().unpolish(self.alarm_summary)
+        self.alarm_summary.style().polish(self.alarm_summary)
 
     def _ack_selected(self) -> None:
         row = self.alarm_table.currentRow()
         if row >= 0:
             self.acknowledge_requested.emit(int(self.alarm_table.item(row, 0).text()))
             self.alarm_table.removeRow(row)
+            self._update_alarm_summary()
 
 
 class GraphsPage(QWidget):
