@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="230" height="120" viewBox="0 0 230 120">
+  <defs>
+    <linearGradient id="tube" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3c4655"/><stop offset="0.5" stop-color="#060a10"/><stop offset="1" stop-color="#252e3b"/>
+    </linearGradient>
+    <linearGradient id="white" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#c7d0dc"/>
+    </linearGradient>
+    <radialGradient id="brass">
+      <stop offset="0" stop-color="#d8bc58"/><stop offset="0.72" stop-color="#8d7421"/><stop offset="1" stop-color="#514411"/>
+    </radialGradient>
+  </defs>
+  <g stroke="#26374d" stroke-width="4" stroke-linejoin="round">
+    <path d="M3 58h17M210 58h17" fill="none" stroke-linecap="round"/>
+    <circle cx="28" cy="58" r="28" fill="url(#brass)"/>
+    <circle cx="202" cy="58" r="28" fill="url(#brass)"/>
+    <rect x="36" y="26" width="30" height="64" fill="url(#white)"/>
+    <rect x="164" y="26" width="30" height="64" fill="url(#white)"/>
+    <rect x="55" y="33" width="120" height="50" rx="22" fill="url(#tube)"/>
+    <path d="M45 91v14M185 91v14M34 105h22M174 105h22" fill="none"/>
+    <circle cx="45" cy="108" r="6" fill="#151c28"/>
+    <circle cx="185" cy="108" r="6" fill="#151c28"/>
+  </g>
+</svg>

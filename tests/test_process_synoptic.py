@@ -36,7 +36,11 @@ def test_synoptic_pressure_states_and_tooltip(qt_application, quality, label) ->
     text = widget.instruments["pressure"].text.toPlainText()
     tooltip = widget.instruments["pressure"].toolTip()
     assert label in text
-    assert "125,40 psi" in text
+    if quality == ReadingQuality.DISCONNECTED:
+        assert "125,40 psi" not in text
+        assert "—" in text
+    else:
+        assert "125,40 psi" in text
     assert "Valor bruto: 12345" in tooltip
     assert "ESP32 / ADS1115" in tooltip
 
@@ -63,7 +67,8 @@ def test_synoptic_flow_animation_starts_and_stops(qt_application) -> None:
     )
     assert not widget.animation_running
     text = widget.instruments["flow"].text.toPlainText()
-    assert "64,051 L/min" in text
+    assert "64,051 L/min" not in text
+    assert "—" in text
     assert "DISCONNECTED" in text
 
 
@@ -90,6 +95,20 @@ def test_synoptic_missing_sensor_and_resource(qt_application) -> None:
     widget = ProcessSynoptic()
     assert "SEM LEITURA" in widget.instruments["pressure"].text.toPlainText()
     assert not widget.animation_running
-    assert any(item.__class__.__name__ == "QGraphicsSvgItem" for item in widget.scene.items())
+    assert len(widget.equipment_items) == 7
+    assert all(
+        item.__class__.__name__ == "EquipmentItem" for item in widget.equipment_items.values()
+    )
+    assert widget.pipe.__class__.__name__ == "PipeItem"
+    for asset in (
+        "filter_regulator.svg",
+        "flowmeter.svg",
+        "pressure_regulator.svg",
+        "pressure_transmitter.svg",
+        "sample_holder.svg",
+        "pump.svg",
+        "valve.svg",
+    ):
+        assert resource_path("assets", "synoptic", "equipment", asset).is_file()
     spec = resource_path("PermeabilimetroSupervisorio.spec").read_text(encoding="utf-8")
     assert '"assets/synoptic"' in spec

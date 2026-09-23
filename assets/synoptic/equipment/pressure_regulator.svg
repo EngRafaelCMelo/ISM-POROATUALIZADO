@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="170" height="150" viewBox="0 0 170 150">
+  <defs>
+    <linearGradient id="black" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#354154"/><stop offset="1" stop-color="#101722"/>
+    </linearGradient>
+    <linearGradient id="steel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#eff4f8"/><stop offset="1" stop-color="#77869a"/>
+    </linearGradient>
+  </defs>
+  <g stroke="#26374d" stroke-width="4" stroke-linejoin="round">
+    <path d="M3 112h28M139 112h28" fill="none" stroke-linecap="round"/>
+    <rect x="30" y="31" width="110" height="102" rx="8" fill="url(#black)"/>
+    <circle cx="112" cy="33" r="29" fill="#f8fafc"/>
+    <circle cx="112" cy="33" r="21" fill="#fff" stroke="#64748b" stroke-width="3"/>
+    <path d="M112 33l14-11" fill="none" stroke="#c93c37" stroke-width="5" stroke-linecap="round"/>
+    <circle cx="112" cy="33" r="4" fill="#26374d"/>
+    <circle cx="59" cy="84" r="25" fill="url(#steel)"/>
+    <circle cx="59" cy="84" r="10" fill="#4b596c"/>
+    <path d="M84 73h38M84 84h30M84 95h38" fill="none" stroke="#91a0b4" stroke-width="3"/>
+    <path d="M46 133v12M123 133v12" fill="none"/>
+  </g>
+</svg>

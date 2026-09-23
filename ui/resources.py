@@ -22,5 +22,5 @@ def font_path(filename: str) -> Path:
     return resource_path("assets", "fonts", filename)
 
 
-def synoptic_path(filename: str = "permeameter.svg") -> Path:
+def synoptic_path(filename: str = "equipment/flowmeter.svg") -> Path:
     return resource_path("assets", "synoptic", filename)

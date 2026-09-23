@@ -47,16 +47,27 @@ def configure(window: MainWindow, state: str) -> None:
     page.simulation_banner.hide()
     synoptic = page.synoptic
     window.simulating = False
-    window.connected = state != "sem-conexao"
-    window.flow_connected = state not in {"sem-conexao", "flowmeter-desconectado"}
+    pressure_connected = state not in {"sem-conexao", "somente-flowmeter"}
+    flow_connected = state not in {
+        "sem-conexao",
+        "somente-pressao",
+        "flowmeter-desconectado",
+    }
+    window.connected = pressure_connected
+    window.flow_connected = flow_connected
     window._update_connection_summary()
-    if state == "sem-conexao":
-        return
-    synoptic.set_pressure_connection("OK")
-    synoptic.set_flow_connection("OK")
-    page.update_pressure(reading(125.4, "psi", ReadingQuality.VALID))
-    page.update_flow(reading(64.051, "L/min", ReadingQuality.VALID))
-    if state == "conectado-sem-ensaio":
+    synoptic.set_pressure_connection("OK" if pressure_connected else "DISCONNECTED")
+    synoptic.set_flow_connection("OK" if flow_connected else "DISCONNECTED")
+    if pressure_connected:
+        page.update_pressure(reading(125.4, "psi", ReadingQuality.VALID))
+    if flow_connected:
+        page.update_flow(reading(64.051, "L/min", ReadingQuality.VALID))
+    if state in {
+        "sem-conexao",
+        "conectado-sem-ensaio",
+        "somente-pressao",
+        "somente-flowmeter",
+    }:
         return
     synoptic.set_sample("ENS-2026-042", "Arenito Botucatu A-17")
     page.set_test_active(True)
@@ -105,6 +116,8 @@ def main() -> int:
     states = (
         "sem-conexao",
         "conectado-sem-ensaio",
+        "somente-pressao",
+        "somente-flowmeter",
         "ensaio-real",
         "pausado",
         "pressao-stale",
@@ -143,7 +156,7 @@ def main() -> int:
                 if not window.grab().save(str(target), "PNG"):
                     raise RuntimeError(f"Falha ao salvar {target}")
         window.close()
-    print(f"24 capturas geradas em {OUTPUT}")
+    print(f"{len(states) * 3} capturas geradas em {OUTPUT}")
     return 0
 
 
