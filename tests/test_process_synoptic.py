@@ -91,6 +91,24 @@ def test_synoptic_resize_sample_test_and_reset(qt_application) -> None:
     assert not widget.animation_running
 
 
+def test_manual_setpoints_are_independent_from_line_pressure_and_lock(qt_application) -> None:
+    widget = ProcessSynoptic()
+    widget.set_setpoints(180.0, 72.0)
+    widget.update_pressure(
+        SensorReading(
+            value=125.4,
+            quality=ReadingQuality.VALID,
+            unit="psi",
+            timestamp=datetime.now(),
+        )
+    )
+    assert widget.setpoints() == (180.0, 72.0)
+    assert "125,40 psi" in widget.instruments["pressure"].text.toPlainText()
+    widget.set_setpoints_locked(True)
+    assert not widget.confinement_control.isEnabled()
+    assert not widget.temperature_control.isEnabled()
+
+
 def test_synoptic_missing_sensor_and_resource(qt_application) -> None:
     widget = ProcessSynoptic()
     assert "SEM LEITURA" in widget.instruments["pressure"].text.toPlainText()

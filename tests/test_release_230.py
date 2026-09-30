@@ -129,7 +129,7 @@ def test_v4_duration_migration_preserves_legacy_meaning(tmp_path):
     assert row["duracao_decorrida_segundos"] is None
     assert row["duracao_pausada_segundos"] is None
     with database.read_connection() as connection:
-        assert connection.execute("SELECT version FROM schema_version").fetchone()[0] == 5
+        assert connection.execute("SELECT version FROM schema_version").fetchone()[0] == 6
     database.close()
 
 

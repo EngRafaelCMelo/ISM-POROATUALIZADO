@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -42,6 +43,10 @@ class TestSetupDialog(QDialog):
         pressure_unit: str = "psi",
         flow_unit: str = "L/min",
         expected_pressure_range: str = "0–400 psi",
+        temperature_setpoint_c: float = 60.0,
+        confinement_pressure_setpoint_psi: float = 150.0,
+        temperature_range_c: tuple[float, float] = (0.0, 200.0),
+        confinement_pressure_range_psi: tuple[float, float] = (0.0, 1000.0),
     ):
         super().__init__(parent)
         self.setWindowTitle("Novo ensaio")
@@ -116,10 +121,19 @@ class TestSetupDialog(QDialog):
         for key, properties in GAS_PROPERTIES.items():
             self.gas.addItem(str(properties["nome"]), key)
         self.temperature = QDoubleSpinBox()
-        self.temperature.setRange(-100.0, 300.0)
-        self.temperature.setDecimals(2)
-        self.temperature.setValue(20.0)
+        self.temperature.setRange(*temperature_range_c)
+        self.temperature.setDecimals(1)
+        self.temperature.setValue(temperature_setpoint_c)
         self.temperature.setSuffix(" °C")
+        self.temperature.setToolTip("Setpoint manual da manta; não é uma leitura de sensor")
+        self.confinement_pressure = QDoubleSpinBox()
+        self.confinement_pressure.setRange(*confinement_pressure_range_psi)
+        self.confinement_pressure.setDecimals(1)
+        self.confinement_pressure.setValue(confinement_pressure_setpoint_psi)
+        self.confinement_pressure.setSuffix(" psi")
+        self.confinement_pressure.setToolTip(
+            "Setpoint manual do confinamento; não é a pressão da linha medida pelo ESP32"
+        )
         self.atmospheric = QDoubleSpinBox()
         self.atmospheric.setRange(50.0, 120.0)
         self.atmospheric.setDecimals(3)
@@ -139,7 +153,17 @@ class TestSetupDialog(QDialog):
         physical_form.addRow("Volume geométrico manual", self.bulk_volume)
         physical_form.addRow("", self.geometry_preview)
         physical_form.addRow("Gás de análise", self.gas)
-        physical_form.addRow("Temperatura", self.temperature)
+        conditions = QGroupBox("Condições operacionais")
+        conditions_form = QFormLayout(conditions)
+        conditions_note = QLabel(
+            "Valores configurados manualmente, sem telemetria. Serão congelados no registro do ensaio."
+        )
+        conditions_note.setWordWrap(True)
+        conditions_note.setObjectName("muted")
+        conditions_form.addRow(conditions_note)
+        conditions_form.addRow("Temperatura da manta (setpoint)*", self.temperature)
+        conditions_form.addRow("Pressão de confinamento (setpoint)*", self.confinement_pressure)
+        physical_form.addRow(conditions)
         physical_form.addRow("Pressão atmosférica local", self.atmospheric)
         physical_form.addRow("Referência das pressões", self.pressure_reference)
         tabs.addTab(physical_page, "Amostra e gás")
@@ -174,6 +198,12 @@ class TestSetupDialog(QDialog):
                 field.style().unpolish(field)
                 field.style().polish(field)
             return
+        for field in (self.temperature, self.confinement_pressure):
+            if not field.hasAcceptableInput():
+                field.setProperty("validationError", True)
+                field.style().unpolish(field)
+                field.style().polish(field)
+                return
         self.accept()
 
     @staticmethod
@@ -206,6 +236,7 @@ class TestSetupDialog(QDialog):
             bulk_volume_cm3=manual_volume or calculated_volume,
             gas_type=self.gas.currentData(),
             temperature_c=self.temperature.value(),
+            confinement_pressure_setpoint_psi=self.confinement_pressure.value(),
             atmospheric_pressure_kpa=self.atmospheric.value(),
             pressure_reference=self.pressure_reference.currentData(),
         )

@@ -128,19 +128,22 @@ class MainWindow(QMainWindow):
         brand.setObjectName("brandLogo")
         brand.setPixmap(
             QPixmap(str(branding_path("ism_simbolo_transparente.png"))).scaled(
-                82,
+                74,
                 58,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
         )
         brand.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        brand_name = QLabel("PERMEABILÍMETRO SUPERVISÓRIO")
+        brand_name = QLabel("<b style='font-size:26px'>ISM</b><br>ENGINEERING SYSTEMS")
         brand_name.setObjectName("brandName")
         brand_name.setWordWrap(True)
-        side_layout.addWidget(brand)
-        side_layout.addWidget(brand_name)
-        side_layout.addSpacing(16)
+        brand_row = QHBoxLayout()
+        brand_row.setSpacing(5)
+        brand_row.addWidget(brand)
+        brand_row.addWidget(brand_name, 1)
+        side_layout.addLayout(brand_row)
+        side_layout.addSpacing(12)
         section = QLabel("OPERAÇÃO")
         section.setObjectName("sidebarCaption")
         side_layout.addWidget(section)
@@ -161,7 +164,10 @@ class MainWindow(QMainWindow):
             button.setIconSize(QSize(19, 19))
             button.setCheckable(True)
             button.setAutoExclusive(True)
-            button.clicked.connect(lambda _checked=False, i=page_index: self._navigate(i))
+            if icon == "new_test":
+                button.clicked.connect(lambda _checked=False: self._start_test())
+            else:
+                button.clicked.connect(lambda _checked=False, i=page_index: self._navigate(i))
             side_layout.addWidget(button)
             self.nav_buttons.append(button)
             self.nav_by_page[page_index] = button
@@ -298,6 +304,24 @@ class MainWindow(QMainWindow):
         self.stack.setMinimumWidth(0)
         self.stack.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self.overview = OverviewPage(self.config.data["sensores"])
+        self.overview.synoptic.set_setpoint_ranges(
+            (
+                float(self.config.get("condicoes_operacionais.pressao_confinamento_min_psi", 0.0)),
+                float(
+                    self.config.get("condicoes_operacionais.pressao_confinamento_max_psi", 1000.0)
+                ),
+            ),
+            (
+                float(self.config.get("condicoes_operacionais.temperatura_min_c", 0.0)),
+                float(self.config.get("condicoes_operacionais.temperatura_max_c", 200.0)),
+            ),
+        )
+        self.overview.synoptic.set_setpoints(
+            float(
+                self.config.get("condicoes_operacionais.pressao_confinamento_setpoint_psi", 150.0)
+            ),
+            float(self.config.get("condicoes_operacionais.temperatura_manta_setpoint_c", 60.0)),
+        )
         self.test_page = TestPage()
         self.calculations = CalculationPage(self.config.data)
         self.graphs = GraphsPage()
@@ -345,6 +369,7 @@ class MainWindow(QMainWindow):
             page.finish_requested.connect(self._finish_test)
             page.marker_requested.connect(self._add_marker)
         self.overview.acknowledge_requested.connect(self._acknowledge_alarm)
+        self.overview.synoptic.setpoints_changed.connect(self._store_operational_setpoints)
         self.graphs.export_requested.connect(self._export_graph_png)
         self.calculations.save_requested.connect(self._save_calculation)
         self.history.search_requested.connect(self._refresh_history)
@@ -777,6 +802,7 @@ class MainWindow(QMainWindow):
                     + "\n• ".join(preflight.errors),
                 )
                 return
+        confinement_setpoint, temperature_setpoint = self.overview.synoptic.setpoints()
         dialog = TestSetupDialog(
             self.test_repository.next_code(),
             Path(self.config.get("dados.diretorio_exportacao") or self.paths.exports),
@@ -788,11 +814,33 @@ class MainWindow(QMainWindow):
                 f"{self.config.get('sensores.pressao.limite_superior', 400):g} "
                 f"{self.config.get('sensores.pressao.unidade', 'psi')}"
             ),
+            temperature_setpoint_c=temperature_setpoint,
+            confinement_pressure_setpoint_psi=confinement_setpoint,
+            temperature_range_c=(
+                float(self.config.get("condicoes_operacionais.temperatura_min_c", 0.0)),
+                float(self.config.get("condicoes_operacionais.temperatura_max_c", 200.0)),
+            ),
+            confinement_pressure_range_psi=(
+                float(self.config.get("condicoes_operacionais.pressao_confinamento_min_psi", 0.0)),
+                float(
+                    self.config.get("condicoes_operacionais.pressao_confinamento_max_psi", 1000.0)
+                ),
+            ),
         )
         if dialog.exec() != dialog.DialogCode.Accepted:
             return
         try:
             definition = dialog.definition()
+            # O diálogo e o sinótico compartilham a mesma fonte enquanto não
+            # há ensaio. A definição criada abaixo é o snapshot imutável.
+            self.overview.synoptic.set_setpoints(
+                definition.confinement_pressure_setpoint_psi or 0.0,
+                definition.temperature_c,
+            )
+            self._store_operational_setpoints(
+                definition.confinement_pressure_setpoint_psi or 0.0,
+                definition.temperature_c,
+            )
             if definition.flow_unit != self.acquisition.latest_flow.unit:
                 QMessageBox.warning(
                     self,
@@ -800,8 +848,15 @@ class MainWindow(QMainWindow):
                     f"Selecione {self.acquisition.latest_flow.unit}, a unidade recebida do flowmeter.",
                 )
                 return
+            snapshot = json.loads(json.dumps(self.config.data))
+            snapshot["condicoes_operacionais_do_ensaio"] = {
+                "temperatura_manta_setpoint_c": definition.temperature_c,
+                "temperatura_origem": "manual_setpoint",
+                "pressao_confinamento_setpoint_psi": (definition.confinement_pressure_setpoint_psi),
+                "pressao_confinamento_origem": "manual_setpoint",
+            }
             definition.configuration_snapshot = json.dumps(
-                self.config.data, ensure_ascii=False, sort_keys=True
+                snapshot, ensure_ascii=False, sort_keys=True
             )
             definition.firmware_version = getattr(self, "_last_firmware_version", "")
             definition.simulated = self.simulating
@@ -833,6 +888,22 @@ class MainWindow(QMainWindow):
         paused = status == TestStatus.PAUSED
         self.overview.set_test_active(True, paused)
         self.test_page.set_session(self.test_service.current)
+
+    def _store_operational_setpoints(
+        self, confinement_pressure_psi: float, blanket_temperature_c: float
+    ) -> None:
+        """Mantém os defaults manuais entre execuções do aplicativo."""
+        if self.test_service.current:
+            return
+        self.config.set(
+            "condicoes_operacionais.pressao_confinamento_setpoint_psi",
+            confinement_pressure_psi,
+        )
+        self.config.set(
+            "condicoes_operacionais.temperatura_manta_setpoint_c",
+            blanket_temperature_c,
+        )
+        self.config.save()
 
     def _finish_test(self) -> None:
         if not self.test_service.current:
@@ -969,6 +1040,7 @@ class MainWindow(QMainWindow):
             bulk_volume_cm3=row["volume_geometrico_cm3"],
             gas_type=row["tipo_gas"] or "Helio",
             temperature_c=row["temperatura_c"] or 20.0,
+            confinement_pressure_setpoint_psi=row["pressao_confinamento_setpoint_psi"],
             atmospheric_pressure_kpa=row["pressao_atmosferica_kpa"] or 101.325,
             pressure_reference=row["referencia_pressao"] or "manometrica",
             configuration_snapshot=row["configuracao_json"] or "",

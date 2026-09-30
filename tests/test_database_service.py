@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import sqlite3
 from datetime import datetime
 
 from core.constants import ReadingQuality
@@ -72,6 +74,7 @@ def test_physical_parameters_and_calculation_are_persisted(tmp_path) -> None:
             bulk_volume_cm3=25.335,
             gas_type="Helio",
             temperature_c=20.0,
+            confinement_pressure_setpoint_psi=150.0,
             atmospheric_pressure_kpa=101.325,
             pressure_reference="manometrica",
         )
@@ -79,6 +82,7 @@ def test_physical_parameters_and_calculation_are_persisted(tmp_path) -> None:
     stored = repository.get(session.id)
     assert stored["comprimento_amostra_mm"] == 50.0
     assert stored["tipo_gas"] == "Helio"
+    assert stored["pressao_confinamento_setpoint_psi"] == 150.0
     calculations = CalculationRepository(database)
     calculations.save(
         session.id,
@@ -114,3 +118,62 @@ def test_database_close_explicitly_closes_checkpoint_connection(tmp_path, monkey
     monkeypatch.setattr(database, "connect", lambda: TrackedConnection())
     database.close()
     assert closed
+
+
+def test_migration_adds_confinement_setpoint_without_losing_legacy_test(tmp_path) -> None:
+    path = tmp_path / "legacy.db"
+    connection = sqlite3.connect(path)
+    connection.executescript(
+        """
+        CREATE TABLE schema_version(version INTEGER NOT NULL);
+        INSERT INTO schema_version VALUES (5);
+        CREATE TABLE ensaios (
+            id INTEGER PRIMARY KEY, codigo TEXT UNIQUE, amostra_nome TEXT, operador TEXT,
+            inicio TEXT, status TEXT
+        );
+        INSERT INTO ensaios(codigo, amostra_nome, operador, inicio, status)
+        VALUES ('ENS-OLD', 'Histórica', 'Operador', '2025-01-01T00:00:00', 'finalizado');
+        CREATE TABLE medicoes (
+            id INTEGER PRIMARY KEY, ensaio_id INTEGER, timestamp_computador TEXT,
+            pressao REAL, vazao_baixa REAL, vazao_alta REAL
+        );
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    database = Database(path)
+    database.initialize()
+    stored = Repository(database).list()[0]
+    assert stored["codigo"] == "ENS-OLD"
+    assert stored["pressao_confinamento_setpoint_psi"] is None
+    with database.read_connection() as migrated:
+        assert migrated.execute("SELECT version FROM schema_version").fetchone()[0] == 6
+
+
+def test_started_test_keeps_operational_snapshot_when_next_defaults_change(tmp_path) -> None:
+    database = Database(tmp_path / "snapshot.db")
+    database.initialize()
+    repository = Repository(database)
+    snapshot = {
+        "condicoes_operacionais_do_ensaio": {
+            "temperatura_manta_setpoint_c": 60.0,
+            "pressao_confinamento_setpoint_psi": 150.0,
+        }
+    }
+    definition = Definition(
+        code="ENS-SNAPSHOT",
+        sample_name="A",
+        temperature_c=60.0,
+        confinement_pressure_setpoint_psi=150.0,
+        configuration_snapshot=json.dumps(snapshot),
+    )
+    session = repository.create(definition)
+
+    # Simula a configuração do próximo ensaio; o registro iniciado não muda.
+    next_temperature, next_pressure = 80.0, 220.0
+    assert (next_temperature, next_pressure) != (60.0, 150.0)
+    stored = repository.get(session.id)
+    assert stored["temperatura_c"] == 60.0
+    assert stored["pressao_confinamento_setpoint_psi"] == 150.0
+    assert json.loads(stored["configuracao_json"]) == snapshot

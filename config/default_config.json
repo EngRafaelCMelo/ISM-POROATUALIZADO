@@ -75,6 +75,14 @@
     "pressao_atmosferica_kpa": 101.325,
     "gas_padrao": "Helio"
   },
+  "condicoes_operacionais": {
+    "temperatura_manta_setpoint_c": 60.0,
+    "temperatura_min_c": 0.0,
+    "temperatura_max_c": 200.0,
+    "pressao_confinamento_setpoint_psi": 150.0,
+    "pressao_confinamento_min_psi": 0.0,
+    "pressao_confinamento_max_psi": 1000.0
+  },
   "simulacao": {
     "ruido": 0.03,
     "intervalo_s": 1.0

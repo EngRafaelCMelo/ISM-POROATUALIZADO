@@ -40,7 +40,14 @@ def test_export_xlsx_json_and_pdf(tmp_path) -> None:
     database.initialize()
     tests = Repository(database)
     events = EventRepository(database)
-    session = tests.create(Definition(code="ENS-2026-0002", sample_name="Amostra B"))
+    session = tests.create(
+        Definition(
+            code="ENS-2026-0002",
+            sample_name="Amostra B",
+            temperature_c=60.0,
+            confinement_pressure_setpoint_psi=150.0,
+        )
+    )
     tests.save_measurement(
         session.id,
         Measurement(
@@ -67,6 +74,8 @@ def test_export_xlsx_json_and_pdf(tmp_path) -> None:
     assert '"vazao"' in exported_json
     assert '"vazao_alta"' not in exported_json
     assert "NaN" not in exported_json
+    assert '"pressao_confinamento_setpoint_psi": 150.0' in exported_json
+    assert '"temperatura_c": 60.0' in exported_json
     json.loads(exported_json, parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)))
     assert pdf.exists() and pdf.stat().st_size > 500
     assert {"Resumo", "Medições", "Alarmes", "Marcações", "Calibração", "Cálculos"} == set(

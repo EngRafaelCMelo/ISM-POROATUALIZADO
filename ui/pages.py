@@ -280,6 +280,7 @@ class OverviewPage(QWidget):
         self.synoptic.set_test_state(
             "PAUSADO" if paused else "EM EXECUÇÃO" if active else "AGUARDANDO"
         )
+        self.synoptic.set_setpoints_locked(active)
         if not active:
             self.duration.setText("00:00:00")
 

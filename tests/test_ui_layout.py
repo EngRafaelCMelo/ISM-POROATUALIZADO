@@ -18,6 +18,7 @@ from ui.pages import (
 from ui.pages import (
     TestPage as SupervisorTestPage,
 )
+from ui.widgets.process_synoptic import ProcessSynoptic
 
 
 def test_buttons_reserve_vertical_space_for_font() -> None:
@@ -55,8 +56,40 @@ def test_hardware_pages_show_one_pressure_and_one_flow() -> None:
 
 
 def test_new_test_dialog_opens(tmp_path) -> None:
-    dialog = SetupDialog("ENS-2026-0300", tmp_path)
+    dialog = SetupDialog(
+        "ENS-2026-0300",
+        tmp_path,
+        temperature_setpoint_c=63.5,
+        confinement_pressure_setpoint_psi=175.0,
+    )
+    assert dialog.temperature.value() == 63.5
+    assert dialog.confinement_pressure.value() == 175.0
     dialog.sample.setText("Amostra")
     dialog._validate()
     assert dialog.sample.text() == "Amostra"
+    definition = dialog.definition()
+    assert definition.temperature_c == 63.5
+    assert definition.confinement_pressure_setpoint_psi == 175.0
     dialog.close()
+
+
+def test_confirmed_dialog_conditions_return_to_overview_setpoints(tmp_path) -> None:
+    synoptic = ProcessSynoptic()
+    synoptic.set_setpoints(150.0, 60.0)
+    pressure, temperature = synoptic.setpoints()
+    dialog = SetupDialog(
+        "ENS-2026-0301",
+        tmp_path,
+        temperature_setpoint_c=temperature,
+        confinement_pressure_setpoint_psi=pressure,
+    )
+    dialog.temperature.setValue(75.0)
+    dialog.confinement_pressure.setValue(210.0)
+    definition = dialog.definition()
+    synoptic.set_setpoints(
+        definition.confinement_pressure_setpoint_psi,
+        definition.temperature_c,
+    )
+    assert synoptic.setpoints() == (210.0, 75.0)
+    dialog.close()
+    synoptic.close()

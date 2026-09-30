@@ -41,9 +41,10 @@ class TestRepository:
                     diretorio_exportacao, inicio, status,
                     comprimento_amostra_mm, diametro_amostra_mm, massa_amostra_g,
                     volume_geometrico_cm3, tipo_gas, temperatura_c,
+                    pressao_confinamento_setpoint_psi,
                     pressao_atmosferica_kpa, referencia_pressao
                     , configuracao_json, versao_firmware, simulado
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     definition.code,
                     sample_id,
@@ -67,6 +68,7 @@ class TestRepository:
                     definition.bulk_volume_cm3,
                     definition.gas_type,
                     definition.temperature_c,
+                    definition.confinement_pressure_setpoint_psi,
                     definition.atmospheric_pressure_kpa,
                     definition.pressure_reference,
                     definition.configuration_snapshot,

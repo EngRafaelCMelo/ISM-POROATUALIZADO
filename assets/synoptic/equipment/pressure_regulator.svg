@@ -1,23 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="170" height="150" viewBox="0 0 170 150">
-  <defs>
-    <linearGradient id="black" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#354154"/><stop offset="1" stop-color="#101722"/>
-    </linearGradient>
-    <linearGradient id="steel" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#eff4f8"/><stop offset="1" stop-color="#77869a"/>
-    </linearGradient>
-  </defs>
-  <g stroke="#26374d" stroke-width="4" stroke-linejoin="round">
-    <path d="M3 112h28M139 112h28" fill="none" stroke-linecap="round"/>
-    <rect x="30" y="31" width="110" height="102" rx="8" fill="url(#black)"/>
-    <circle cx="112" cy="33" r="29" fill="#f8fafc"/>
-    <circle cx="112" cy="33" r="21" fill="#fff" stroke="#64748b" stroke-width="3"/>
-    <path d="M112 33l14-11" fill="none" stroke="#c93c37" stroke-width="5" stroke-linecap="round"/>
-    <circle cx="112" cy="33" r="4" fill="#26374d"/>
-    <circle cx="59" cy="84" r="25" fill="url(#steel)"/>
-    <circle cx="59" cy="84" r="10" fill="#4b596c"/>
-    <path d="M84 73h38M84 84h30M84 95h38" fill="none" stroke="#91a0b4" stroke-width="3"/>
-    <path d="M46 133v12M123 133v12" fill="none"/>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" width="150" height="150" viewBox="0 0 150 150">
+  <defs><radialGradient id="yellow"><stop stop-color="#F5D94E"/><stop offset=".75" stop-color="#D2AB12"/><stop offset="1" stop-color="#8A6D08"/></radialGradient><linearGradient id="steel"><stop stop-color="#F1F4F3"/><stop offset=".5" stop-color="#99A5A8"/><stop offset="1" stop-color="#4D5B60"/></linearGradient></defs>
+  <g stroke="#172A38" stroke-width="3.5" stroke-linejoin="round"><path d="M75 1v15M75 132v17" fill="none"/><circle cx="75" cy="61" r="48" fill="#16232A"/><circle cx="75" cy="61" r="39" fill="url(#yellow)"/><rect x="48" y="48" width="54" height="22" rx="3" fill="#42565A"/><circle cx="54" cy="82" r="4" fill="#263945"/><circle cx="75" cy="82" r="4" fill="#263945"/><circle cx="96" cy="82" r="4" fill="#263945"/><path d="M57 109h36v22H57z" fill="url(#steel)"/></g>
 </svg>

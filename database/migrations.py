@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 SCHEMA_SQL = """
 PRAGMA journal_mode=WAL;
@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER NOT NULL
 );
 INSERT INTO schema_version(version)
-SELECT 5 WHERE NOT EXISTS (SELECT 1 FROM schema_version);
+SELECT 6 WHERE NOT EXISTS (SELECT 1 FROM schema_version);
 
 CREATE TABLE IF NOT EXISTS usuarios (
     id INTEGER PRIMARY KEY,
@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS ensaios (
     volume_geometrico_cm3 REAL,
     tipo_gas TEXT,
     temperatura_c REAL,
+    pressao_confinamento_setpoint_psi REAL,
     pressao_atmosferica_kpa REAL,
     referencia_pressao TEXT,
     configuracao_json TEXT,
@@ -185,6 +186,7 @@ TEST_COLUMNS: dict[str, str] = {
     "volume_geometrico_cm3": "REAL",
     "tipo_gas": "TEXT",
     "temperatura_c": "REAL",
+    "pressao_confinamento_setpoint_psi": "REAL",
     "pressao_atmosferica_kpa": "REAL",
     "referencia_pressao": "TEXT",
     "configuracao_json": "TEXT",

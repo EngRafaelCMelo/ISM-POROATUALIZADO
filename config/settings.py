@@ -156,6 +156,28 @@ class ConfigManager:
             raise ValueError("Timeout do flowmeter deve estar entre 0,75 e 1,5 s")
         if int(flow.get("intervalo_ms", 0)) < 125:
             raise ValueError("Intervalo do flowmeter deve ser de pelo menos 125 ms")
+        conditions = data.get("condicoes_operacionais", {})
+        for value_key, minimum_key, maximum_key, label in (
+            (
+                "temperatura_manta_setpoint_c",
+                "temperatura_min_c",
+                "temperatura_max_c",
+                "temperatura da manta",
+            ),
+            (
+                "pressao_confinamento_setpoint_psi",
+                "pressao_confinamento_min_psi",
+                "pressao_confinamento_max_psi",
+                "pressão de confinamento",
+            ),
+        ):
+            value = float(conditions.get(value_key, 0.0))
+            minimum = float(conditions.get(minimum_key, 0.0))
+            maximum = float(conditions.get(maximum_key, 0.0))
+            if not all(math.isfinite(number) for number in (value, minimum, maximum)):
+                raise ValueError(f"Faixa de {label} deve conter apenas valores finitos")
+            if minimum >= maximum or not minimum <= value <= maximum:
+                raise ValueError(f"Setpoint de {label} deve estar dentro da faixa configurada")
 
     @staticmethod
     def _deep_update(target: dict[str, Any], source: dict[str, Any]) -> None:
