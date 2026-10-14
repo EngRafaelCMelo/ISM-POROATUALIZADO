@@ -544,6 +544,40 @@ class ExportService:
             ]
         )
 
+    def _operational_conditions(self, test, styles):
+        confinement = (
+            self._number(test["pressao_confinamento_setpoint_psi"], 1, "psi") + " (setpoint manual)"
+            if test["pressao_confinamento_setpoint_psi"] is not None
+            else "Não informado"
+        )
+        temperature = (
+            self._number(test["temperatura_c"], 1, "°C") + " (setpoint manual)"
+            if test["temperatura_c"] is not None
+            else "Não informado"
+        )
+        rows = [
+            [
+                "Temperatura configurada da manta térmica",
+                temperature,
+            ],
+            [
+                "Pressão de confinamento configurada",
+                confinement,
+            ],
+            ["Gás utilizado", self._text(test["tipo_gas"])],
+            ["Pressão atmosférica", self._number(test["pressao_atmosferica_kpa"], 3, "kPa")],
+            ["Referência da pressão", self._text(test["referencia_pressao"])],
+            ["Intervalo de aquisição", self._number(test["intervalo_aquisicao"], 2, "s")],
+            ["Data e hora de início", self._timestamp(test["inicio"])],
+            ["Operador", self._text(test["operador"])],
+        ]
+        return KeepTogether(
+            [
+                Paragraph("Condições operacionais do ensaio", styles["Section"]),
+                self._table(rows, [70 * mm, 100 * mm]),
+            ]
+        )
+
     def _acquisition_summary(self, test, measurements, styles):
         total = len(measurements)
         rows = [
@@ -824,6 +858,7 @@ class ExportService:
         )
         story = self._cover(test, styles, issued)
         story.extend([self._identification(test, styles), Spacer(1, 4 * mm)])
+        story.extend([self._operational_conditions(test, styles), Spacer(1, 4 * mm)])
         story.extend(self._acquisition_summary(test, measurements, styles))
         story.extend(self._statistics(measurements, test, styles))
         story.append(CondPageBreak(90 * mm))

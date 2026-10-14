@@ -129,7 +129,7 @@ def test_v4_duration_migration_preserves_legacy_meaning(tmp_path):
     assert row["duracao_decorrida_segundos"] is None
     assert row["duracao_pausada_segundos"] is None
     with database.read_connection() as connection:
-        assert connection.execute("SELECT version FROM schema_version").fetchone()[0] == 5
+        assert connection.execute("SELECT version FROM schema_version").fetchone()[0] == 6
     database.close()
 
 
@@ -174,7 +174,13 @@ def test_klinkenberg_duplicate_and_invalidation(qt_application, monkeypatch):
 def test_normal_unit_survives_capture_storage_and_exports(qt_application, tmp_path):
     settings = {
         "calculos": {"pressao_atmosferica_kpa": 101.325},
-        "flowmeter": {"normal_pressure_kpa_abs": 101.325, "normal_temperature_c": 0},
+        "flowmeter": {
+            "unit": "NL/min",
+            "unit_confirmed": True,
+            "normal_pressure_kpa_abs": 101.325,
+            "normal_temperature_c": 0,
+            "normal_reference_confirmed": True,
+        },
     }
     page = CalculationPage(settings)
     definition = Definition(

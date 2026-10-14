@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -25,6 +26,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -107,7 +109,7 @@ class MainWindow(QMainWindow):
         self._setup_timers()
         self.setWindowTitle(APP_NAME)
         self.resize(1500, 920)
-        self.setMinimumSize(1180, 700)
+        self.setMinimumSize(960, 600)
 
     def _build_ui(self) -> None:
         root = QWidget()
@@ -126,18 +128,22 @@ class MainWindow(QMainWindow):
         brand.setObjectName("brandLogo")
         brand.setPixmap(
             QPixmap(str(branding_path("ism_simbolo_transparente.png"))).scaled(
-                82,
+                74,
                 58,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
         )
         brand.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        brand_name = QLabel("PERMEABILÍMETRO SUPERVISÓRIO")
+        brand_name = QLabel("<b style='font-size:26px'>ISM</b><br>ENGINEERING SYSTEMS")
         brand_name.setObjectName("brandName")
-        side_layout.addWidget(brand)
-        side_layout.addWidget(brand_name)
-        side_layout.addSpacing(16)
+        brand_name.setWordWrap(True)
+        brand_row = QHBoxLayout()
+        brand_row.setSpacing(5)
+        brand_row.addWidget(brand)
+        brand_row.addWidget(brand_name, 1)
+        side_layout.addLayout(brand_row)
+        side_layout.addSpacing(12)
         section = QLabel("OPERAÇÃO")
         section.setObjectName("sidebarCaption")
         side_layout.addWidget(section)
@@ -158,7 +164,10 @@ class MainWindow(QMainWindow):
             button.setIconSize(QSize(19, 19))
             button.setCheckable(True)
             button.setAutoExclusive(True)
-            button.clicked.connect(lambda _checked=False, i=page_index: self._navigate(i))
+            if icon == "new_test":
+                button.clicked.connect(lambda _checked=False: self._start_test())
+            else:
+                button.clicked.connect(lambda _checked=False, i=page_index: self._navigate(i))
             side_layout.addWidget(button)
             self.nav_buttons.append(button)
             self.nav_by_page[page_index] = button
@@ -208,16 +217,16 @@ class MainWindow(QMainWindow):
         top_layout.addStretch()
         self.mode_badge = StatusBadge("MODO REAL", "info")
         self.connection_badge = StatusBadge("Desconectado", "neutral")
+        self.connection_badge.hide()  # Estado detalhado pertence à faixa Conexões.
         self.equipment_badge = StatusBadge("Aguardando dados", "neutral")
         self.clock_label = QLabel()
         self.user_label = QLabel(f"Usuário: {self.config.get('aplicacao.usuario', 'Operador')}")
-        self.clock_label.setVisible(False)
-        self.user_label.setVisible(False)
+        self.clock_label.setVisible(True)
+        self.user_label.setVisible(True)
         self.user_label.setToolTip(
             f"Operador atual: {self.config.get('aplicacao.usuario', 'Operador')}"
         )
         top_layout.addWidget(self.mode_badge)
-        top_layout.addWidget(self.connection_badge)
         top_layout.addWidget(self.equipment_badge)
         top_layout.addWidget(self.clock_label)
         top_layout.addWidget(self.user_label)
@@ -225,15 +234,36 @@ class MainWindow(QMainWindow):
 
         connection_bar = QFrame()
         connection_bar.setObjectName("connectionBar")
-        connection_layout = QHBoxLayout(connection_bar)
-        connection_layout.setContentsMargins(12, 8, 12, 8)
+        connection_layout = QVBoxLayout(connection_bar)
+        connection_layout.setContentsMargins(12, 6, 12, 6)
+        connection_layout.setSpacing(6)
+        connection_summary = QHBoxLayout()
+        connection_title = QLabel("Conexões")
+        connection_title.setObjectName("sectionTitle")
+        self.esp32_connection_badge = StatusBadge("ESP32: Desconectado", "neutral")
+        self.flow_connection_badge = StatusBadge("Flowmeter: Desconectado", "neutral")
+        self.connection_expand_button = QPushButton("Configurar")
+        self.connection_expand_button.setObjectName("quiet")
+        self.connection_expand_button.setCheckable(True)
+        connection_summary.addWidget(connection_title)
+        connection_summary.addWidget(self.esp32_connection_badge)
+        connection_summary.addWidget(self.flow_connection_badge)
+        connection_summary.addStretch()
+        connection_summary.addWidget(self.connection_expand_button)
+        connection_layout.addLayout(connection_summary)
+
+        self.connection_details = QWidget()
+        details_layout = QGridLayout(self.connection_details)
+        details_layout.setContentsMargins(0, 2, 0, 2)
+        details_layout.setHorizontalSpacing(8)
+        details_layout.setVerticalSpacing(6)
         self.port_combo = QComboBox()
         self.port_combo.setMinimumWidth(190)
         self.baud_combo = QComboBox()
         self.baud_combo.addItems(["9600", "19200", "38400", "57600", "115200", "230400"])
         self.baud_combo.setCurrentText(str(self.config.get("comunicacao.baud_rate", 115200)))
-        refresh_ports = QPushButton("Atualizar portas")
-        refresh_ports.clicked.connect(self._refresh_ports)
+        self.refresh_ports_button = QPushButton("Atualizar portas")
+        self.refresh_ports_button.clicked.connect(self._refresh_ports)
         self.connect_button = QPushButton("Conectar")
         self.connect_button.setObjectName("primary")
         self.connect_button.setIcon(QIcon(icon_path("connect")))
@@ -252,22 +282,47 @@ class MainWindow(QMainWindow):
         self.sim_fault.addItem("Corrente 21,0 mA", "critico_alto")
         self.sim_fault.addItem("Perda de comunicação", "perda")
         self.sim_fault.currentIndexChanged.connect(self._apply_sim_fault)
-        connection_layout.addWidget(QLabel("Porta"))
-        connection_layout.addWidget(self.port_combo)
-        connection_layout.addWidget(refresh_ports)
-        connection_layout.addWidget(QLabel("Baud"))
-        connection_layout.addWidget(self.baud_combo)
-        connection_layout.addWidget(self.connect_button)
-        connection_layout.addWidget(QLabel("Flowmeter"))
-        connection_layout.addWidget(self.flow_port_combo)
-        connection_layout.addWidget(self.flow_connect_button)
-        connection_layout.addStretch()
-        connection_layout.addWidget(self.simulation_button)
-        connection_layout.addWidget(self.sim_fault)
+        details_layout.addWidget(QLabel("ESP32"), 0, 0)
+        details_layout.addWidget(self.port_combo, 0, 1)
+        details_layout.addWidget(QLabel("Baud"), 0, 2)
+        details_layout.addWidget(self.baud_combo, 0, 3)
+        details_layout.addWidget(self.connect_button, 0, 4)
+        details_layout.addWidget(QLabel("Flowmeter USB–RS485"), 1, 0)
+        details_layout.addWidget(self.flow_port_combo, 1, 1, 1, 3)
+        details_layout.addWidget(self.flow_connect_button, 1, 4)
+        details_layout.addWidget(self.refresh_ports_button, 2, 1)
+        details_layout.addWidget(self.simulation_button, 2, 3)
+        details_layout.addWidget(self.sim_fault, 2, 4)
+        details_layout.setColumnStretch(1, 2)
+        details_layout.setColumnStretch(3, 1)
+        connection_layout.addWidget(self.connection_details)
+        self.connection_details.hide()
+        self.connection_expand_button.toggled.connect(self._toggle_connection_details)
         main.addWidget(connection_bar)
 
         self.stack = QStackedWidget()
+        self.stack.setMinimumWidth(0)
+        self.stack.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self.overview = OverviewPage(self.config.data["sensores"])
+        self.overview.synoptic.set_setpoint_ranges(
+            (
+                float(self.config.get("condicoes_operacionais.pressao_confinamento_min_psi", 0.0)),
+                float(
+                    self.config.get("condicoes_operacionais.pressao_confinamento_max_psi", 1000.0)
+                ),
+            ),
+            (
+                float(self.config.get("condicoes_operacionais.temperatura_min_c", 0.0)),
+                float(self.config.get("condicoes_operacionais.temperatura_max_c", 200.0)),
+            ),
+        )
+        self.overview.synoptic.set_setpoints(
+            float(
+                self.config.get("condicoes_operacionais.pressao_confinamento_setpoint_psi", 150.0)
+            ),
+            float(self.config.get("condicoes_operacionais.temperatura_manta_setpoint_c", 60.0)),
+        )
+        self.overview.synoptic.apply_layout(self.config.get("interface.sinotico_layout", {}))
         self.test_page = TestPage()
         self.calculations = CalculationPage(self.config.data)
         self.graphs = GraphsPage()
@@ -292,17 +347,21 @@ class MainWindow(QMainWindow):
             self.about,
         ):
             self.stack.addWidget(page)
-        # A 1360x728 display leaves less vertical space after the Windows
-        # title bar.  Keep the navigation/header fixed and let the active
-        # page scroll instead of clipping its lower controls and labels.
+        # As páginas extensas continuam roláveis; a visão geral foi dimensionada
+        # para caber integralmente em 1366×768 com esta faixa recolhida.
         page_scroll = QScrollArea()
+        self.page_scroll = page_scroll
         page_scroll.setObjectName("pageScroll")
         page_scroll.setWidgetResizable(True)
         page_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        page_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        page_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         page_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         page_scroll.setWidget(self.stack)
         main.addWidget(page_scroll, 1)
+
+    def _toggle_connection_details(self, expanded: bool) -> None:
+        self.connection_details.setVisible(expanded)
+        self.connection_expand_button.setText("Recolher" if expanded else "Configurar")
 
     def _connect_signals(self) -> None:
         for page in (self.overview, self.test_page):
@@ -311,6 +370,9 @@ class MainWindow(QMainWindow):
             page.finish_requested.connect(self._finish_test)
             page.marker_requested.connect(self._add_marker)
         self.overview.acknowledge_requested.connect(self._acknowledge_alarm)
+        self.overview.synoptic.setpoints_changed.connect(self._store_operational_setpoints)
+        self.overview.layout_save_requested.connect(self._save_synoptic_layout)
+        self.overview.layout_reset_requested.connect(self._reset_synoptic_layout)
         self.graphs.export_requested.connect(self._export_graph_png)
         self.calculations.save_requested.connect(self._save_calculation)
         self.history.search_requested.connect(self._refresh_history)
@@ -381,6 +443,27 @@ class MainWindow(QMainWindow):
         )
         label.style().unpolish(label)
         label.style().polish(label)
+
+    def _update_connection_summary(self) -> None:
+        if self.simulating:
+            self.esp32_connection_badge.set_state("ESP32: Simulado", "warn")
+            self.flow_connection_badge.set_state("Flowmeter: Simulado", "warn")
+            self.equipment_badge.set_state("Sistema em simulação", "warn")
+            return
+        self.esp32_connection_badge.set_state(
+            f"ESP32: {'Conectado' if self.connected else 'Desconectado'}",
+            "good" if self.connected else "neutral",
+        )
+        self.flow_connection_badge.set_state(
+            f"Flowmeter: {'Conectado' if self.flow_connected else 'Desconectado'}",
+            "good" if self.flow_connected else "neutral",
+        )
+        if self.connected and self.flow_connected:
+            self.equipment_badge.set_state("Sistema conectado", "good")
+        elif self.connected or self.flow_connected:
+            self.equipment_badge.set_state("Conexão parcial", "warn")
+        else:
+            self.equipment_badge.set_state("Sistema desconectado", "neutral")
 
     def _refresh_ports(self) -> None:
         selected = self.port_combo.currentData()
@@ -473,9 +556,12 @@ class MainWindow(QMainWindow):
         self.flow_connected = False
         self.acquisition.process_flow_error("SEM_COMUNICACAO")
         self.flow_connect_button.setText("Conectar flowmeter")
+        self._update_connection_summary()
 
     def _on_flowmeter_state(self, connected: bool, message: str) -> None:
         self.flow_connected = connected
+        self.overview.synoptic.set_flow_connection("OK" if connected else "DISCONNECTED")
+        self._update_connection_summary()
         self.statusBar().showMessage(message, 5000)
         if connected:
             self.flow_connect_button.setText("Desconectar flowmeter")
@@ -548,6 +634,7 @@ class MainWindow(QMainWindow):
         self.simulating = False
         self.simulation_button.setText("Iniciar simulação")
         self.overview.simulation_banner.hide()
+        self._update_connection_summary()
 
     def _apply_sim_fault(self) -> None:
         if not self.simulator:
@@ -561,6 +648,7 @@ class MainWindow(QMainWindow):
 
     def _on_connection_state(self, connected: bool, message: str) -> None:
         self.connected = connected
+        self.overview.synoptic.set_pressure_connection("OK" if connected else "DISCONNECTED")
         self.acquisition.process_pressure_connection(connected, message)
         self._set_badge(
             self.connection_badge,
@@ -570,6 +658,7 @@ class MainWindow(QMainWindow):
         self.diagnostics.values["connection"].setText(message)
         self.diagnostics.values["mode"].setText("Real")
         self.mode_badge.set_state("MODO REAL", "info")
+        self._update_connection_summary()
         if not connected:
             self.connect_button.setText("Conectar")
 
@@ -588,6 +677,11 @@ class MainWindow(QMainWindow):
             "SIMULAÇÃO" if active else "MODO REAL", "warn" if active else "info"
         )
         self.overview.simulation_banner.setVisible(active)
+        state = "SIMULATED" if active else "DISCONNECTED"
+        self.overview.synoptic.set_pressure_connection(state)
+        self.overview.synoptic.set_flow_connection(state)
+        self.overview.synoptic.set_test_state("SIMULADO" if active else "AGUARDANDO")
+        self._update_connection_summary()
 
     def _on_serial_error(self, message: str) -> None:
         logger.error("Erro serial: %s", message)
@@ -645,6 +739,7 @@ class MainWindow(QMainWindow):
     def _on_flowmeter_statistics(self, statistics: dict) -> None:
         summary = " | ".join(f"{key}: {value}" for key, value in statistics.items())
         self.diagnostics.values["modbus_stats"].setText(summary)
+        self.overview.synoptic.set_diagnostics("flow", **statistics)
 
     def _on_modbus_frame(self, direction: str, frame: str) -> None:
         self.diagnostics.frames.appendPlainText(f"{datetime.now():%H:%M:%S.%f} {direction} {frame}")
@@ -662,6 +757,7 @@ class MainWindow(QMainWindow):
             self.overview.add_alarm(alarm_id, alarm)
             if alarm.severity.value in ("alarme", "crítico"):
                 self._set_badge(self.equipment_badge, alarm.severity.value.capitalize(), "bad")
+                self.overview.synoptic.set_critical_alarm(alarm.severity.value == "crítico")
             elif alarm.severity.value == "atenção":
                 self._set_badge(self.equipment_badge, "Atenção", "warn")
         except Exception:
@@ -709,21 +805,45 @@ class MainWindow(QMainWindow):
                     + "\n• ".join(preflight.errors),
                 )
                 return
+        confinement_setpoint, temperature_setpoint = self.overview.synoptic.setpoints()
         dialog = TestSetupDialog(
             self.test_repository.next_code(),
             Path(self.config.get("dados.diretorio_exportacao") or self.paths.exports),
             self,
             pressure_unit=str(self.config.get("sensores.pressao.unidade", "psi")),
+            flow_unit=str(self.config.get("flowmeter.unit", "L/min")),
             expected_pressure_range=(
                 f"{self.config.get('sensores.pressao.limite_inferior', 0):g}–"
                 f"{self.config.get('sensores.pressao.limite_superior', 400):g} "
                 f"{self.config.get('sensores.pressao.unidade', 'psi')}"
+            ),
+            temperature_setpoint_c=temperature_setpoint,
+            confinement_pressure_setpoint_psi=confinement_setpoint,
+            temperature_range_c=(
+                float(self.config.get("condicoes_operacionais.temperatura_min_c", 0.0)),
+                float(self.config.get("condicoes_operacionais.temperatura_max_c", 200.0)),
+            ),
+            confinement_pressure_range_psi=(
+                float(self.config.get("condicoes_operacionais.pressao_confinamento_min_psi", 0.0)),
+                float(
+                    self.config.get("condicoes_operacionais.pressao_confinamento_max_psi", 1000.0)
+                ),
             ),
         )
         if dialog.exec() != dialog.DialogCode.Accepted:
             return
         try:
             definition = dialog.definition()
+            # O diálogo e o sinótico compartilham a mesma fonte enquanto não
+            # há ensaio. A definição criada abaixo é o snapshot imutável.
+            self.overview.synoptic.set_setpoints(
+                definition.confinement_pressure_setpoint_psi or 0.0,
+                definition.temperature_c,
+            )
+            self._store_operational_setpoints(
+                definition.confinement_pressure_setpoint_psi or 0.0,
+                definition.temperature_c,
+            )
             if definition.flow_unit != self.acquisition.latest_flow.unit:
                 QMessageBox.warning(
                     self,
@@ -731,8 +851,15 @@ class MainWindow(QMainWindow):
                     f"Selecione {self.acquisition.latest_flow.unit}, a unidade recebida do flowmeter.",
                 )
                 return
+            snapshot = json.loads(json.dumps(self.config.data))
+            snapshot["condicoes_operacionais_do_ensaio"] = {
+                "temperatura_manta_setpoint_c": definition.temperature_c,
+                "temperatura_origem": "manual_setpoint",
+                "pressao_confinamento_setpoint_psi": (definition.confinement_pressure_setpoint_psi),
+                "pressao_confinamento_origem": "manual_setpoint",
+            }
             definition.configuration_snapshot = json.dumps(
-                self.config.data, ensure_ascii=False, sort_keys=True
+                snapshot, ensure_ascii=False, sort_keys=True
             )
             definition.firmware_version = getattr(self, "_last_firmware_version", "")
             definition.simulated = self.simulating
@@ -745,6 +872,9 @@ class MainWindow(QMainWindow):
             self.calculation_test_id = session.id
             self.overview.reset_test()
             self.overview.set_test_active(True)
+            self.overview.synoptic.set_sample(
+                session.definition.code, session.definition.sample_name
+            )
             self.current_test_label.setText(
                 f"{session.definition.code} — {session.definition.sample_name}"
             )
@@ -761,6 +891,32 @@ class MainWindow(QMainWindow):
         paused = status == TestStatus.PAUSED
         self.overview.set_test_active(True, paused)
         self.test_page.set_session(self.test_service.current)
+
+    def _store_operational_setpoints(
+        self, confinement_pressure_psi: float, blanket_temperature_c: float
+    ) -> None:
+        """Mantém os defaults manuais entre execuções do aplicativo."""
+        if self.test_service.current:
+            return
+        self.config.set(
+            "condicoes_operacionais.pressao_confinamento_setpoint_psi",
+            confinement_pressure_psi,
+        )
+        self.config.set(
+            "condicoes_operacionais.temperatura_manta_setpoint_c",
+            blanket_temperature_c,
+        )
+        self.config.save()
+
+    def _save_synoptic_layout(self, layout: dict) -> None:
+        if self.test_service.current:
+            return
+        self.config.set("interface.sinotico_layout", layout)
+
+    def _reset_synoptic_layout(self) -> None:
+        if self.test_service.current:
+            return
+        self.config.set("interface.sinotico_layout", {})
 
     def _finish_test(self) -> None:
         if not self.test_service.current:
@@ -897,6 +1053,7 @@ class MainWindow(QMainWindow):
             bulk_volume_cm3=row["volume_geometrico_cm3"],
             gas_type=row["tipo_gas"] or "Helio",
             temperature_c=row["temperatura_c"] or 20.0,
+            confinement_pressure_setpoint_psi=row["pressao_confinamento_setpoint_psi"],
             atmospheric_pressure_kpa=row["pressao_atmosferica_kpa"] or 101.325,
             pressure_reference=row["referencia_pressao"] or "manometrica",
             configuration_snapshot=row["configuracao_json"] or "",
@@ -1158,6 +1315,9 @@ class MainWindow(QMainWindow):
             seconds = int(self.test_service.elapsed_seconds())
             self.overview.duration.setText(
                 f"{seconds // 3600:02d}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}"
+            )
+            self.overview.synoptic.set_runtime(
+                self.overview.duration.text(), self.test_service.current.sample_count
             )
             self.test_page.labels["duration"].setText(self.overview.duration.text())
         frequency = 0.0

@@ -244,7 +244,9 @@ class FlowmeterWorker(QThread):
             if bool(self.config.get("log_frames", False)):
                 self.frame_logged.emit("RX", response.hex(" ").upper() or "<timeout>")
                 logger.info("Flowmeter RX: %s", response.hex(" ").upper() or "<timeout>")
-            parsed = parse_flow_response(response)
+            parsed = parse_flow_response(
+                response, str(self.config.get("unit") or self.config.get("unidade") or "L/min")
+            )
             self.statistics.successes += 1
             self._last_error_key = ""
             self.reading_received.emit(

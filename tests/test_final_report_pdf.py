@@ -61,6 +61,7 @@ def _build_report(
             bulk_volume_cm3=25.338,
             gas_type="Hélio",
             temperature_c=23.4,
+            confinement_pressure_setpoint_psi=None if legacy else 150.0,
             atmospheric_pressure_kpa=101.325,
             firmware_version="FW-2.1",
             simulated=simulated,
@@ -159,6 +160,11 @@ def test_real_pdf_has_logo_unicode_fonts_and_no_internal_names(tmp_path) -> None
     assert len(reader.pages[0].images) >= 1
     assert "RELATÓRIO FINAL DE ENSAIO" in text
     assert "RELATÓRIO DEMONSTRATIVO" not in text
+    assert "Condições operacionais do ensaio" in text
+    normalized = re.sub(r"\s+", " ", text)
+    assert "Temperatura configurada da manta térmica" in normalized
+    assert "Pressão de confinamento configurada" in normalized
+    assert "150,0 psi (setpoint manual)" in normalized
     assert "á à â ã é ê í ó ô õ ú ç ° ² Δ ∞ × R²" in text
     assert not any(name in text for name in FORBIDDEN_INTERNAL_NAMES)
     assert not any(token in text for token in ("NaN", "Infinity", "None", "{}", "[]"))
@@ -251,6 +257,7 @@ def test_many_alarms_long_comments_and_legacy_data_are_robust(tmp_path) -> None:
     assert "Alarme - Pressão" in text
     assert "Alarme - Vazão" in text
     assert "descrição extensa" in text
+    assert "Não informado" in text
     assert len(reader.pages) < 30
     database.close()
 

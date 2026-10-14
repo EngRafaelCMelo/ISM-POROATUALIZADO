@@ -145,6 +145,10 @@ class ConfigManager:
                 if value is not None and not float(lower) <= float(value) <= float(upper):
                     raise ValueError(f"{name} de {key} deve estar dentro da faixa configurada")
         flow = data.get("flowmeter", {})
+        unit = str(flow.get("unit") or sensors.get("vazao", {}).get("unidade", ""))
+        if unit not in {"L/min", "NL/min", "mL/min"}:
+            raise ValueError("A unidade do flowmeter deve ser L/min, NL/min ou mL/min")
+        sensors.setdefault("vazao", {})["unidade"] = unit
         scale = float(flow.get("fator_escala", 0.0))
         if not math.isfinite(scale) or scale <= 0:
             raise ValueError("O fator de escala do flowmeter deve ser positivo e finito")
@@ -152,6 +156,28 @@ class ConfigManager:
             raise ValueError("Timeout do flowmeter deve estar entre 0,75 e 1,5 s")
         if int(flow.get("intervalo_ms", 0)) < 125:
             raise ValueError("Intervalo do flowmeter deve ser de pelo menos 125 ms")
+        conditions = data.get("condicoes_operacionais", {})
+        for value_key, minimum_key, maximum_key, label in (
+            (
+                "temperatura_manta_setpoint_c",
+                "temperatura_min_c",
+                "temperatura_max_c",
+                "temperatura da manta",
+            ),
+            (
+                "pressao_confinamento_setpoint_psi",
+                "pressao_confinamento_min_psi",
+                "pressao_confinamento_max_psi",
+                "pressão de confinamento",
+            ),
+        ):
+            value = float(conditions.get(value_key, 0.0))
+            minimum = float(conditions.get(minimum_key, 0.0))
+            maximum = float(conditions.get(maximum_key, 0.0))
+            if not all(math.isfinite(number) for number in (value, minimum, maximum)):
+                raise ValueError(f"Faixa de {label} deve conter apenas valores finitos")
+            if minimum >= maximum or not minimum <= value <= maximum:
+                raise ValueError(f"Setpoint de {label} deve estar dentro da faixa configurada")
 
     @staticmethod
     def _deep_update(target: dict[str, Any], source: dict[str, Any]) -> None:
@@ -243,8 +269,20 @@ class ConfigManager:
         elif float(pressure["limite_inferior"]) >= float(pressure["limite_superior"]):
             errors.append("A faixa de pressão é inválida")
         flow = self.get("flowmeter", {})
-        if self.get("sensores.vazao.unidade") != FLOW_PROTOCOL_UNIT:
-            errors.append(f"A unidade configurada do flowmeter deve ser {FLOW_PROTOCOL_UNIT}")
+        unit = str(flow.get("unit") or self.get("sensores.vazao.unidade", ""))
+        if unit not in {"L/min", FLOW_PROTOCOL_UNIT, "mL/min"}:
+            errors.append("Selecione a unidade fornecida pelo flowmeter")
+        if not flow.get("unit_confirmed"):
+            errors.append("Confirme no manual/equipamento a unidade fornecida pelo flowmeter")
+        if unit == FLOW_PROTOCOL_UNIT:
+            if not flow.get("normal_reference_confirmed"):
+                errors.append("Confirme as referências normalizadas de pressão e temperatura")
+            if flow.get("normal_pressure_kpa_abs") is None:
+                errors.append("Informe a pressão normal absoluta de referência do NL/min")
+            if flow.get("normal_temperature_c") is None:
+                errors.append("Informe a temperatura normal de referência do NL/min")
+        elif flow.get("volume_reference_pressure_kpa_abs") is None:
+            errors.append(f"Informe a pressão absoluta de referência do volume em {unit}")
         required = (
             "porta",
             "baud_rate",

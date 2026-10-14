@@ -48,8 +48,46 @@ def test_layout_keeps_primary_controls_visible_at_supported_sizes(tmp_path) -> N
         app.processEvents()
         assert window.overview.start_button.isVisible()
         assert window.overview.finish_button.isVisible()
-        assert window.connect_button.isVisible()
+        assert window.connection_expand_button.isVisible()
+        assert window.esp32_connection_badge.isVisible()
+        assert window.flow_connection_badge.isVisible()
         assert window.stack.geometry().width() > 800
+        assert not window.page_scroll.verticalScrollBar().isVisible()
+    window.connection_expand_button.setChecked(True)
+    app.processEvents()
+    assert window.connect_button.isVisible()
+    window.close()
+
+
+def test_overview_uses_compact_collapsible_sections(tmp_path) -> None:
+    app = QApplication.instance() or QApplication([])
+    window = build_window(tmp_path)
+    window.show()
+    app.processEvents()
+
+    assert not window.connection_details.isVisible()
+    assert not window.overview.alarm_table.isVisible()
+    assert window.overview.alarm_summary.text() == "Nenhum alarme ativo"
+    scene = window.overview.synoptic.scene.sceneRect()
+    assert scene.width() <= 1225
+    assert scene.height() <= 485
+    window.close()
+
+
+def test_synoptic_layout_editor_saves_and_restores_user_positions(tmp_path) -> None:
+    window = build_window(tmp_path)
+    holder = window.overview.synoptic.equipment_items["sample"]
+    holder.moveBy(18, -8)
+
+    window.overview.layout_edit_button.setChecked(True)
+    window.overview.layout_edit_button.setChecked(False)
+    stored = window.config.get("interface.sinotico_layout")
+    assert stored["items"]["equipment.sample"] == {"x": 454.5, "y": 307.8}
+
+    window.overview.layout_reset_button.click()
+    assert window.config.get("interface.sinotico_layout") == {}
+    assert holder.pos().x() == 436.5
+    assert holder.pos().y() == 315.8
     window.close()
 
 

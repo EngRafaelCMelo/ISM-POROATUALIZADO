@@ -29,6 +29,12 @@ QLabel#sensorValue { font-size: 34pt; font-weight: 650; color: #17212B; }
 QLabel#sensorUnit { color: #667085; font-size: 12pt; }
 QLabel#sensorMeta { color: #667085; font-size: 9pt; }
 QLabel#metricValue { color: #17212B; font-size: 11pt; font-weight: 600; }
+QLabel#metricLabel { color: #667085; font-size: 8.5pt; }
+QWidget#testMetric { min-width: 78px; }
+QLabel#alarmSummary { color: #526274; padding-left: 8px; }
+QLabel#alarmSummary[severity="warning"] { color: #9A5404; font-weight: 600; }
+QLabel#alarmSummary[severity="critical"] { color: #A52E2A; font-weight: 650; }
+QGraphicsView#processSynoptic { background: transparent; border: 0; }
 
 QLabel[state="good"], QLabel#pillGood { color: #126B3D; background: #E8F5ED; border: 1px solid #B8DEC8; border-radius: 10px; padding: 3px 8px; font-weight: 600; }
 QLabel[state="warn"], QLabel#pillWarn { color: #9A5404; background: #FFF4E5; border: 1px solid #F2D3A5; border-radius: 10px; padding: 3px 8px; font-weight: 600; }
@@ -45,6 +51,7 @@ QPushButton:focus, QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpin
 QPushButton:disabled { color: #98A2B3; background: #F1F3F5; border-color: #D8DEE6; }
 QPushButton#primary { background: #123D63; color: #FFFFFF; border-color: #123D63; font-weight: 650; }
 QPushButton#primary:hover { background: #0B2D50; color: #FFFFFF; }
+QPushButton#primary:disabled { color: #98A2B3; background: #F1F3F5; border-color: #D8DEE6; }
 QPushButton#danger { color: #B4302C; border-color: #D9A09D; background: #FFFFFF; }
 QPushButton#danger:hover { color: #FFFFFF; background: #C93C37; border-color: #C93C37; }
 QPushButton#quiet { color: #526274; background: transparent; border-color: transparent; }

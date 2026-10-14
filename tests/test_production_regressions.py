@@ -100,20 +100,30 @@ def test_start_test_through_main_window_uses_active_mode(tmp_path, monkeypatch) 
     database.initialize()
     window = MainWindow(config, database, paths)
     window.simulating = True
+    window.overview.synoptic.set_setpoints(185.0, 68.0)
+    dialog_defaults = {}
     definition = Definition(
         "ACTIVE-1",
         "Amostra",
         pressure_unit="bar",
-        flow_unit="NL/min",
+        flow_unit="L/min",
         sample_length_mm=50,
         sample_diameter_mm=25,
+        temperature_c=68.0,
+        confinement_pressure_setpoint_psi=185.0,
     )
     monkeypatch.setattr(
         QMessageBox,
         "question",
         staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Yes),
     )
-    monkeypatch.setattr(SetupDialog, "exec", lambda self: QDialog.DialogCode.Accepted)
+
+    def accept_dialog(dialog):
+        dialog_defaults["temperature_c"] = dialog.temperature.value()
+        dialog_defaults["confinement_pressure_psi"] = dialog.confinement_pressure.value()
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(SetupDialog, "exec", accept_dialog)
     monkeypatch.setattr(SetupDialog, "definition", lambda self: definition)
 
     window._start_test()
@@ -123,7 +133,13 @@ def test_start_test_through_main_window_uses_active_mode(tmp_path, monkeypatch) 
     assert window.calculations.capture_button.isEnabled()
     assert window.calculations.calculate_button.isEnabled()
     assert window.graphs.pressure_unit == "bar"
-    assert window.graphs.flow_unit == "NL/min"
+    assert window.graphs.flow_unit == "L/min"
+    assert dialog_defaults == {
+        "temperature_c": 68.0,
+        "confinement_pressure_psi": 185.0,
+    }
+    assert config.get("condicoes_operacionais.temperatura_manta_setpoint_c") == 68.0
+    assert config.get("condicoes_operacionais.pressao_confinamento_setpoint_psi") == 185.0
     window.test_service.current = None
     window.close()
 

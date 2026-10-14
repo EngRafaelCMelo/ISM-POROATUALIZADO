@@ -39,6 +39,7 @@ from core.constants import ReadingQuality
 from core.models import Alarm, Measurement, SensorReading, TestSession
 from ui.resources import branding_path
 from ui.theme import COLORS, icon_path
+from ui.widgets.process_synoptic import ProcessSynoptic
 from ui.widgets.sensor_card import SensorCard
 
 logger = logging.getLogger(__name__)
@@ -70,17 +71,21 @@ class OverviewPage(QWidget):
     finish_requested = Signal()
     marker_requested = Signal()
     acknowledge_requested = Signal(int)
+    layout_save_requested = Signal(dict)
+    layout_reset_requested = Signal()
 
     def __init__(self, sensor_config: dict[str, dict[str, Any]]):
         super().__init__()
         outer = QVBoxLayout(self)
-        outer.addLayout(page_header("Visão geral", "Leituras instantâneas e estado do ensaio"))
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(8)
         self.simulation_banner = QLabel("MODO SIMULAÇÃO — dados não provenientes do equipamento")
         self.simulation_banner.setObjectName("simulationBanner")
         self.simulation_banner.hide()
         outer.addWidget(self.simulation_banner)
 
-        cards = QHBoxLayout()
+        # Mantidos como adaptadores compatíveis para telas/testes existentes; o
+        # valor operacional visível agora fica ancorado no próprio instrumento.
         self.cards: dict[str, SensorCard] = {}
         for key in ("pressao", "vazao"):
             cfg = sensor_config[key]
@@ -91,48 +96,58 @@ class OverviewPage(QWidget):
                 float(cfg.get("limite_superior") or 100),
                 int(cfg.get("casas", 2)),
             )
-            cards.addWidget(card)
             self.cards[key] = card
-        outer.addLayout(cards)
 
-        lower = QHBoxLayout()
-        plot_card, plot_layout = card_frame()
-        plot_header = QHBoxLayout()
-        title = QLabel("Tendência operacional · últimos 60 segundos")
+        synoptic_card, synoptic_layout = card_frame()
+        synoptic_layout.setContentsMargins(14, 10, 14, 10)
+        synoptic_layout.setSpacing(6)
+        synoptic_header = QHBoxLayout()
+        title = QLabel("Processo · caminho do gás")
         title.setObjectName("sectionTitle")
-        clear_plot = QPushButton("Limpar visualização")
-        clear_plot.setObjectName("quiet")
-        clear_plot.setToolTip("Limpa somente o gráfico; os dados do ensaio permanecem gravados")
-        clear_plot.clicked.connect(self.clear_visualization)
-        plot_header.addWidget(title)
-        plot_header.addStretch()
-        plot_header.addWidget(clear_plot)
-        plot_layout.addLayout(plot_header)
-        self.compact_plot = pg.PlotWidget()
-        self.compact_plot.setMinimumHeight(210)
-        self.compact_plot.showGrid(x=True, y=True, alpha=0.15)
-        self.compact_plot.setBackground("w")
-        self.compact_plot.setLabel("bottom", "Tempo", units="s")
-        self.compact_plot.setLabel("left", "Pressão / vazão")
-        self.pressure_curve = self.compact_plot.plot(
-            pen=pg.mkPen(COLORS["pressure"], width=2), name="Pressão"
+        self.synoptic_hint = QLabel("Clique nos instrumentos para detalhes")
+        self.synoptic_hint.setObjectName("muted")
+        self.layout_edit_button = QPushButton("Editar layout")
+        self.layout_edit_button.setObjectName("quiet")
+        self.layout_edit_button.setCheckable(True)
+        self.layout_edit_button.setToolTip(
+            "Arraste equipamentos, caixas e nomes; clique novamente para salvar"
         )
-        self.flow_curve = self.compact_plot.plot(
-            pen=pg.mkPen(COLORS["flow"], width=2), name="Vazão"
-        )
-        self.compact_plot.addLegend(offset=(8, 8))
-        plot_layout.addWidget(self.compact_plot)
-        lower.addWidget(plot_card, 2)
+        self.layout_reset_button = QPushButton("Restaurar")
+        self.layout_reset_button.setObjectName("quiet")
+        self.layout_reset_button.setToolTip("Restaurar a disposição original do sinótico")
+        synoptic_header.addWidget(title)
+        synoptic_header.addStretch()
+        synoptic_header.addWidget(self.synoptic_hint)
+        synoptic_header.addWidget(self.layout_edit_button)
+        synoptic_header.addWidget(self.layout_reset_button)
+        synoptic_layout.addLayout(synoptic_header)
+        self.synoptic = ProcessSynoptic()
+        self.layout_edit_button.toggled.connect(self._toggle_layout_editing)
+        self.layout_reset_button.clicked.connect(self._reset_layout)
+        synoptic_layout.addWidget(self.synoptic, 1)
+        outer.addWidget(synoptic_card, 1)
 
         status_card, status_layout = card_frame()
+        status_layout.setContentsMargins(14, 9, 14, 9)
+        status_layout.setSpacing(6)
         status_title = QLabel("Ensaio")
         status_title.setObjectName("sectionTitle")
-        status_layout.addWidget(status_title)
+        status_head = QHBoxLayout()
+        status_head.addWidget(status_title)
+        status_head.addStretch()
+        self.test_state_label = QLabel("Aguardando")
+        self.test_state_label.setObjectName("pillNeutral")
+        status_head.addWidget(self.test_state_label)
+        status_layout.addLayout(status_head)
         stats = QGridLayout()
+        stats.setHorizontalSpacing(16)
+        stats.setVerticalSpacing(2)
         self.duration = QLabel("00:00:00")
         self.samples = QLabel("0")
         self.rate = QLabel("— Hz")
         self.recording = QLabel("Aguardando")
+        # Compatibilidade com integrações antigas; a fonte é única e não precisa
+        # ocupar espaço no resumo operacional.
         self.active_flow = QLabel("Flow meter único")
         self.valid_count = QLabel("0")
         self.invalid_count = QLabel("0")
@@ -142,19 +157,23 @@ class OverviewPage(QWidget):
                 ("Amostras", self.samples),
                 ("Taxa real", self.rate),
                 ("Registro", self.recording),
-                ("Sensor de vazão", self.active_flow),
                 ("Leituras válidas", self.valid_count),
                 ("Leituras inválidas", self.invalid_count),
             ]
         ):
+            metric = QWidget()
+            metric.setObjectName("testMetric")
+            metric_layout = QVBoxLayout(metric)
+            metric_layout.setContentsMargins(0, 0, 0, 0)
+            metric_layout.setSpacing(0)
             name = QLabel(label)
-            name.setObjectName("muted")
-            row, group = divmod(i, 2)
-            stats.addWidget(name, row * 2, group * 2)
-            stats.addWidget(value, row * 2 + 1, group * 2)
-            stats.setColumnStretch(group * 2, 1)
+            name.setObjectName("metricLabel")
+            value.setObjectName("metricValue")
+            metric_layout.addWidget(name)
+            metric_layout.addWidget(value)
+            stats.addWidget(metric, 0, i)
+            stats.setColumnStretch(i, 1)
         status_layout.addLayout(stats)
-        status_layout.addStretch()
         self.start_button = QPushButton("Iniciar ensaio")
         self.start_button.setObjectName("primary")
         self.pause_button = QPushButton("Pausar")
@@ -172,28 +191,40 @@ class OverviewPage(QWidget):
             self.marker_button,
         ):
             button.setIconSize(QSize(17, 17))
+            button.setMinimumWidth(138)
         self.start_button.clicked.connect(self.start_requested)
         self.pause_button.clicked.connect(self.pause_requested)
         self.finish_button.clicked.connect(self.finish_requested)
         self.marker_button.clicked.connect(self.marker_requested)
-        actions = QGridLayout()
-        actions.addWidget(self.start_button, 0, 0)
-        actions.addWidget(self.pause_button, 0, 1)
-        actions.addWidget(self.marker_button, 1, 0)
-        actions.addWidget(self.finish_button, 1, 1)
+        actions = QHBoxLayout()
+        actions.setSpacing(8)
+        actions.addStretch()
+        actions.addWidget(self.start_button)
+        actions.addWidget(self.pause_button)
+        actions.addWidget(self.marker_button)
+        actions.addWidget(self.finish_button)
         status_layout.addLayout(actions)
         self.set_test_active(False)
-        lower.addWidget(status_card, 1)
-        outer.addLayout(lower)
+        outer.addWidget(status_card)
 
         alarms_card, alarms_layout = card_frame()
+        alarms_layout.setContentsMargins(14, 7, 14, 7)
+        alarms_layout.setSpacing(6)
         alarm_head = QHBoxLayout()
-        alarm_title = QLabel("Alarmes ativos")
+        alarm_title = QLabel("Alarmes")
         alarm_title.setObjectName("sectionTitle")
+        self.alarm_summary = QLabel("Nenhum alarme ativo")
+        self.alarm_summary.setObjectName("alarmSummary")
+        self.alarm_details_button = QPushButton("Ver detalhes")
+        self.alarm_details_button.setObjectName("quiet")
+        self.alarm_details_button.setCheckable(True)
+        self.alarm_details_button.setEnabled(False)
+        self.alarm_details_button.toggled.connect(self._toggle_alarm_details)
         self.ack_button = QPushButton("Reconhecer selecionado")
         self.ack_button.clicked.connect(self._ack_selected)
         alarm_head.addWidget(alarm_title)
-        alarm_head.addStretch()
+        alarm_head.addWidget(self.alarm_summary, 1)
+        alarm_head.addWidget(self.alarm_details_button)
         alarm_head.addWidget(self.ack_button)
         alarms_layout.addLayout(alarm_head)
         self.alarm_table = QTableWidget(0, 5)
@@ -203,7 +234,9 @@ class OverviewPage(QWidget):
         self.alarm_table.setColumnHidden(0, True)
         self.alarm_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
         self.alarm_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.alarm_table.setMaximumHeight(145)
+        self.alarm_table.setMaximumHeight(120)
+        self.alarm_table.hide()
+        self.ack_button.hide()
         alarms_layout.addWidget(self.alarm_table)
         outer.addWidget(alarms_card)
 
@@ -219,14 +252,31 @@ class OverviewPage(QWidget):
         self.update_pressure(measurement.pressure)
         self.update_flow(measurement.flow)
 
+    def _toggle_layout_editing(self, editing: bool) -> None:
+        self.synoptic.set_layout_editing(editing)
+        self.start_button.setEnabled(not editing)
+        self.layout_edit_button.setText("Salvar layout" if editing else "Editar layout")
+        self.layout_reset_button.setEnabled(not editing)
+        self.synoptic_hint.setText(
+            "Arraste os itens para reposicionar"
+            if editing
+            else "Clique nos instrumentos para detalhes"
+        )
+        if not editing:
+            self.layout_save_requested.emit(self.synoptic.layout_positions())
+
+    def _reset_layout(self) -> None:
+        self.synoptic.reset_layout()
+        self.layout_reset_requested.emit()
+
     def update_pressure(self, reading: SensorReading) -> None:
         self.cards["pressao"].update_reading(reading)
+        self.synoptic.update_pressure(reading)
         timestamp = reading.timestamp or datetime.now()
         if self._first_time is None:
             self._first_time = timestamp
         self._pressure_times.append((timestamp - self._first_time).total_seconds())
         self._pressure.append(float("nan") if reading.value is None else reading.value)
-        self.pressure_curve.setData(list(self._pressure_times), list(self._pressure))
 
     def update_flow(self, reading: SensorReading) -> None:
         self.cards["vazao"].update_reading(
@@ -235,6 +285,7 @@ class OverviewPage(QWidget):
             if reading.quality == ReadingQuality.DISCONNECTED
             else None,
         )
+        self.synoptic.update_flow(reading)
         timestamp = reading.timestamp
         if timestamp is None:
             return
@@ -242,15 +293,30 @@ class OverviewPage(QWidget):
             self._first_time = timestamp
         self._flow_times.append((timestamp - self._first_time).total_seconds())
         self._flow.append(float("nan") if reading.value is None else reading.value)
-        self.flow_curve.setData(list(self._flow_times), list(self._flow))
 
     def set_test_active(self, active: bool, paused: bool = False) -> None:
+        if active and self.layout_edit_button.isChecked():
+            self.layout_edit_button.setChecked(False)
+        self.layout_edit_button.setEnabled(not active)
+        self.layout_reset_button.setEnabled(not active and not self.layout_edit_button.isChecked())
         self.start_button.setEnabled(not active)
         self.pause_button.setEnabled(active)
         self.finish_button.setEnabled(active)
         self.marker_button.setEnabled(active)
         self.pause_button.setText("Retomar" if paused else "Pausar")
         self.recording.setText("Pausado" if paused else "Gravando" if active else "Aguardando")
+        self.test_state_label.setText(
+            "Pausado" if paused else "Em andamento" if active else "Aguardando"
+        )
+        self.test_state_label.setObjectName(
+            "pillWarn" if paused else "pillGood" if active else "pillNeutral"
+        )
+        self.test_state_label.style().unpolish(self.test_state_label)
+        self.test_state_label.style().polish(self.test_state_label)
+        self.synoptic.set_test_state(
+            "PAUSADO" if paused else "EM EXECUÇÃO" if active else "AGUARDANDO"
+        )
+        self.synoptic.set_setpoints_locked(active)
         if not active:
             self.duration.setText("00:00:00")
 
@@ -260,6 +326,7 @@ class OverviewPage(QWidget):
         self.samples.setText("0")
         self._report_ready = False
         self.set_test_active(False)
+        self.synoptic.reset()
 
     def set_report_ready(self, ready: bool) -> None:
         self._report_ready = ready
@@ -270,8 +337,6 @@ class OverviewPage(QWidget):
         self._pressure.clear()
         self._flow.clear()
         self._first_time = None
-        self.pressure_curve.clear()
-        self.flow_curve.clear()
 
     def add_alarm(self, alarm_id: int, alarm: Alarm) -> None:
         row = self.alarm_table.rowCount()
@@ -289,12 +354,42 @@ class OverviewPage(QWidget):
             if alarm.severity.value in ("alarme", "crítico"):
                 item.setForeground(QColor(COLORS["error"]))
             self.alarm_table.setItem(row, col, item)
+        self._update_alarm_summary()
+
+    def _toggle_alarm_details(self, expanded: bool) -> None:
+        self.alarm_table.setVisible(expanded)
+        self.ack_button.setVisible(expanded)
+        self.alarm_details_button.setText("Ocultar detalhes" if expanded else "Ver detalhes")
+
+    def _update_alarm_summary(self) -> None:
+        count = self.alarm_table.rowCount()
+        self.alarm_details_button.setEnabled(count > 0)
+        if not count:
+            self.alarm_summary.setText("Nenhum alarme ativo")
+            self.alarm_summary.setProperty("severity", "normal")
+            self.alarm_summary.style().unpolish(self.alarm_summary)
+            self.alarm_summary.style().polish(self.alarm_summary)
+            self.alarm_details_button.setChecked(False)
+            return
+        severities = [
+            self.alarm_table.item(row, 3).text() for row in range(self.alarm_table.rowCount())
+        ]
+        order = {"crítico": 3, "alarme": 2, "atenção": 1}
+        greatest = max(severities, key=lambda value: order.get(value.lower(), 0))
+        latest = self.alarm_table.item(count - 1, 4).text()
+        self.alarm_summary.setText(f"{count} ativo(s) · {greatest.capitalize()} · {latest}")
+        self.alarm_summary.setProperty(
+            "severity", "critical" if greatest.lower() in {"crítico", "alarme"} else "warning"
+        )
+        self.alarm_summary.style().unpolish(self.alarm_summary)
+        self.alarm_summary.style().polish(self.alarm_summary)
 
     def _ack_selected(self) -> None:
         row = self.alarm_table.currentRow()
         if row >= 0:
             self.acknowledge_requested.emit(int(self.alarm_table.item(row, 0).text()))
             self.alarm_table.removeRow(row)
+            self._update_alarm_summary()
 
 
 class GraphsPage(QWidget):
@@ -1226,6 +1321,7 @@ class SettingsPage(QWidget):
 
     def __init__(self, config: dict[str, Any]):
         super().__init__()
+        self.config = config
         layout = QVBoxLayout(self)
         layout.addLayout(page_header("Configurações", "Comunicação, sensores, interface e dados"))
         self.tabs = QTabWidget()
@@ -1289,6 +1385,44 @@ class SettingsPage(QWidget):
         self.modbus_configured = QCheckBox("Parâmetros conferidos no manual")
         self.modbus_configured.setChecked(bool(flow_cfg.get("configurado")))
         modbus_form.addRow("Estado", self.modbus_configured)
+        unit_help = QLabel(
+            "L/min é volume nas condições informadas; NL/min é volume normalizado e exige "
+            "pressão e temperatura normais confirmadas. Não selecione NL/min por suposição."
+        )
+        unit_help.setWordWrap(True)
+        unit_help.setObjectName("warningBanner")
+        modbus_form.addRow(unit_help)
+        self.flow_unit = QComboBox()
+        self.flow_unit.addItems(["L/min", "NL/min", "mL/min"])
+        self.flow_unit.setCurrentText(
+            str(flow_cfg.get("unit") or config["sensores"]["vazao"].get("unidade", "L/min"))
+        )
+        self.flow_unit_confirmed = QCheckBox("Unidade conferida no manual/equipamento")
+        self.flow_unit_confirmed.setChecked(bool(flow_cfg.get("unit_confirmed", False)))
+        self.normal_pressure = QDoubleSpinBox()
+        self.normal_pressure.setRange(0.001, 10000)
+        self.normal_pressure.setDecimals(3)
+        self.normal_pressure.setValue(float(flow_cfg.get("normal_pressure_kpa_abs") or 101.325))
+        self.normal_temperature = QDoubleSpinBox()
+        self.normal_temperature.setRange(-273.14, 1000)
+        self.normal_temperature.setDecimals(2)
+        self.normal_temperature.setValue(float(flow_cfg.get("normal_temperature_c") or 0.0))
+        self.normal_reference_confirmed = QCheckBox("Pressão e temperatura normais conferidas")
+        self.normal_reference_confirmed.setChecked(
+            bool(flow_cfg.get("normal_reference_confirmed", False))
+        )
+        self.volume_reference_pressure = QDoubleSpinBox()
+        self.volume_reference_pressure.setRange(0.001, 10000)
+        self.volume_reference_pressure.setDecimals(3)
+        self.volume_reference_pressure.setValue(
+            float(flow_cfg.get("volume_reference_pressure_kpa_abs") or 101.325)
+        )
+        modbus_form.addRow("Unidade fornecida", self.flow_unit)
+        modbus_form.addRow("Confirmação da unidade", self.flow_unit_confirmed)
+        modbus_form.addRow("Pressão normal (kPa abs)", self.normal_pressure)
+        modbus_form.addRow("Temperatura normal (°C)", self.normal_temperature)
+        modbus_form.addRow("Confirmação das referências", self.normal_reference_confirmed)
+        modbus_form.addRow("Pressão de referência L/min (kPa abs)", self.volume_reference_pressure)
         self.modbus_fields: dict[str, QLineEdit] = {}
         for key, label in [
             ("porta", "Porta USB–RS485"),
@@ -1379,7 +1513,15 @@ class SettingsPage(QWidget):
                 "limite_inferior": float(lower) if lower else None,
                 "limite_superior": float(upper) if upper else None,
             }
-        flow: dict[str, Any] = {"configurado": self.modbus_configured.isChecked()}
+        flow: dict[str, Any] = {
+            "configurado": self.modbus_configured.isChecked(),
+            "unit": self.flow_unit.currentText(),
+            "unit_confirmed": self.flow_unit_confirmed.isChecked(),
+            "normal_pressure_kpa_abs": self.normal_pressure.value(),
+            "normal_temperature_c": self.normal_temperature.value(),
+            "normal_reference_confirmed": self.normal_reference_confirmed.isChecked(),
+            "volume_reference_pressure_kpa_abs": self.volume_reference_pressure.value(),
+        }
         integer_keys = {
             "slave_id",
             "baud_rate",
@@ -1406,6 +1548,7 @@ class SettingsPage(QWidget):
                 "log_frames": self.modbus_log_frames.isChecked(),
             }
         )
+        sensors["vazao"]["unidade"] = self.flow_unit.currentText()
         self.save_requested.emit(
             {
                 "comunicacao": {

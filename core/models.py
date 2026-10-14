@@ -153,6 +153,9 @@ class TestDefinition:
     bulk_volume_cm3: float | None = None
     gas_type: str = "Helio"
     temperature_c: float = 20.0
+    # Condições manuais congeladas no instante em que o ensaio é iniciado.
+    # Não representam telemetria.
+    confinement_pressure_setpoint_psi: float | None = None
     atmospheric_pressure_kpa: float = 101.325
     pressure_reference: str = "manometrica"
     configuration_snapshot: str = ""

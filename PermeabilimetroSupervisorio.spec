@@ -15,6 +15,7 @@ a = Analysis(
         (str(root / "config" / "default_config.json"), "config"),
         (str(root / "assets" / "branding"), "assets/branding"),
         (str(root / "assets" / "fonts"), "assets/fonts"),
+        (str(root / "assets" / "synoptic"), "assets/synoptic"),
     ],
     hiddenimports=[
         "openpyxl",
@@ -22,6 +23,8 @@ a = Analysis(
         "pyqtgraph",
         "matplotlib",
         "matplotlib.backends.backend_agg",
+        "PySide6.QtSvg",
+        "PySide6.QtSvgWidgets",
     ],
     hookspath=[],
     runtime_hooks=[],

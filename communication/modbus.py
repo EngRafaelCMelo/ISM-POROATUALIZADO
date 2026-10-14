@@ -87,7 +87,7 @@ def expected_response_size(prefix: bytes) -> int | None:
     return 3 + prefix[2] + 2
 
 
-def parse_flow_response(response: bytes) -> FlowFrame:
+def parse_flow_response(response: bytes, unit: str = FLOW_PROTOCOL_UNIT) -> FlowFrame:
     if not response:
         raise ModbusFrameError(ModbusErrorCode.TIMEOUT, "Flowmeter não respondeu no prazo")
     if len(response) < 5:
@@ -137,4 +137,4 @@ def parse_flow_response(response: bytes) -> FlowFrame:
             f"Resposta Modbus com {len(response)} bytes, esperados {FLOW_RESPONSE_SIZE}",
         )
     raw = int.from_bytes(response[3:7], byteorder="big", signed=False)
-    return FlowFrame(raw_uint32=raw, value=raw / FLOW_SCALE)
+    return FlowFrame(raw_uint32=raw, value=raw / FLOW_SCALE, unit=unit)
