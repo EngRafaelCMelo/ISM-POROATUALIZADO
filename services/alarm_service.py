@@ -9,6 +9,30 @@ from core.constants import Severity
 from core.models import Alarm, Measurement, SensorReading
 
 
+class AlarmSoundController:
+    """Controla o aviso sonoro sem tornar a aquisição dependente de áudio."""
+
+    def __init__(self, enabled: bool = True, cooldown_s: float = 5.0):
+        self.enabled = enabled
+        self.cooldown_s = max(0.0, float(cooldown_s))
+        self._last_sound_at: datetime | None = None
+
+    def configure(self, enabled: bool, cooldown_s: float | None = None) -> None:
+        self.enabled = bool(enabled)
+        if cooldown_s is not None:
+            self.cooldown_s = max(0.0, float(cooldown_s))
+
+    def should_sound(self, alarm: Alarm) -> bool:
+        if not self.enabled or alarm.severity != Severity.CRITICAL:
+            return False
+        if self._last_sound_at is not None:
+            elapsed = (alarm.timestamp - self._last_sound_at).total_seconds()
+            if elapsed < self.cooldown_s:
+                return False
+        self._last_sound_at = alarm.timestamp
+        return True
+
+
 class AlarmService:
     def __init__(self, sensor_config: dict[str, dict[str, Any]]):
         self.config = sensor_config

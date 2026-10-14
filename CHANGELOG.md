@@ -22,3 +22,8 @@
 - Build Windows com testes, firmware, pacote, smoke PDF e SHA-256.
 
 O firmware segue em 2.2.0; sua versão é independente.
+## 2.4.0 — 2026-10-14
+
+- Fixou o sinótico oficial e removeu a edição manual de posições.
+- Adicionou recuperação explícita de ensaios interrompidos e registro no relatório.
+- Reforçou preflight, setpoints manuais, alarmes sonoros com cooldown e backup/restore.

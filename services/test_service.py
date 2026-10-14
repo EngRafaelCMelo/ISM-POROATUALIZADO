@@ -24,6 +24,20 @@ class TestService:
         logger.info("Ensaio iniciado: %s | simulado=%s", definition.code, definition.simulated)
         return self.current
 
+    def recover(self, session: TestSession) -> TestSession:
+        if self.current and self.current.status in (TestStatus.RUNNING, TestStatus.PAUSED):
+            raise RuntimeError("Já existe um ensaio ativo")
+        if session.status != TestStatus.INTERRUPTED:
+            raise ValueError("Somente ensaios interrompidos podem ser recuperados")
+        self.tests.recover(session.id)
+        session.status = TestStatus.RUNNING
+        session.ended_at = None
+        session.sample_count = len(self.tests.measurements(session.id))
+        self.current = session
+        self._paused_at = None
+        logger.info("Ensaio recuperado: %s", session.definition.code)
+        return session
+
     def record(self, measurement: Measurement) -> bool:
         if not self.current or self.current.status != TestStatus.RUNNING:
             return False

@@ -1,7 +1,7 @@
 # Supervisório ISM – Permeabilímetro
 
 Aplicativo de aquisição, ensaio e relatório para o permeabilímetro ISM.
-Versão do aplicativo: 2.3.0. Firmware atual: 2.2.0 (independente).
+Versão do aplicativo: 2.4.0. Firmware atual: 2.2.0 (independente).
 
 ## Arquitetura de produção
 
@@ -89,6 +89,18 @@ Pressão e vazão mantêm timestamps próprios. A medição combinada para banco
 cálculos é emitida no intervalo de `aquisicao.intervalo_s`; uma atualização de
 vazão não altera o timestamp da pressão. Leituras acima do limite de idade são
 marcadas `STALE` e deixam de ser válidas.
+
+Antes de iniciar um ensaio real, a interface apresenta uma lista de verificação
+com ESP32, flowmeter, estabilidade da comunicação, amostra, parâmetros
+obrigatórios, setpoints, diretório de relatório e banco de dados. Os setpoints
+de pressão de confinamento e temperatura da manta são comandos manuais e ficam
+registrados com unidade e indicação de setpoint.
+
+Se o aplicativo for fechado inesperadamente, o próximo início identifica o
+ensaio interrompido e exige a escolha entre recuperá-lo ou encerrá-lo. As duas
+decisões ficam registradas no histórico e no relatório. Em **Configurações >
+Dados**, é possível escolher o destino, criar, listar e restaurar backups; toda
+restauração valida o arquivo e cria uma cópia de segurança do banco atual.
 
 ## Instalação e execução
 

@@ -8,7 +8,6 @@ from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtSvgWidgets import QGraphicsSvgItem
 from PySide6.QtWidgets import (
     QDoubleSpinBox,
-    QGraphicsItem,
     QGraphicsPathItem,
     QGraphicsProxyWidget,
     QGraphicsRectItem,
@@ -77,7 +76,6 @@ class EquipmentItem(QGraphicsSvgItem):
         super().__init__(str(resource_path("assets", "synoptic", "equipment", asset)))
         self.key = key
         self.callback = callback
-        self.layout_editing = False
         self.setPos(x, y)
         self.setScale(scale)
         self.setZValue(4)
@@ -85,30 +83,11 @@ class EquipmentItem(QGraphicsSvgItem):
         self.setAcceptHoverEvents(key is not None)
         if key is not None:
             self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.hover_outline = QGraphicsRectItem(self.boundingRect().adjusted(-5, -5, 5, 5), self)
-        self.hover_outline.setBrush(Qt.BrushStyle.NoBrush)
-        self.hover_outline.setPen(QPen(QColor("#58B719"), 3, Qt.PenStyle.DashLine))
-        self.hover_outline.setZValue(-1)
-        self.hover_outline.hide()
-
-    def hoverEnterEvent(self, event) -> None:  # noqa: N802
-        if self.key is not None:
-            self.hover_outline.show()
-            self.setOpacity(0.94)
-        super().hoverEnterEvent(event)
-
-    def hoverLeaveEvent(self, event) -> None:  # noqa: N802
-        self.hover_outline.hide()
-        self.setOpacity(1.0)
-        super().hoverLeaveEvent(event)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
-        if not self.layout_editing and self.key is not None and self.callback is not None:
+        if self.key is not None and self.callback is not None:
             self.callback(self.key)
         super().mousePressEvent(event)
-
-    def set_layout_editing(self, editing: bool) -> None:
-        self.layout_editing = editing
 
 
 class ValueOverlayItem(QGraphicsRectItem):
@@ -118,7 +97,6 @@ class ValueOverlayItem(QGraphicsRectItem):
         super().__init__(QRectF(0, 0, rect.width(), rect.height()))
         self.key = key
         self.callback = callback
-        self.layout_editing = False
         self.setPos(rect.topLeft())
         self.setAcceptHoverEvents(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -165,12 +143,8 @@ class ValueOverlayItem(QGraphicsRectItem):
         super().hoverLeaveEvent(event)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
-        if not self.layout_editing:
-            self.callback(self.key)
+        self.callback(self.key)
         super().mousePressEvent(event)
-
-    def set_layout_editing(self, editing: bool) -> None:
-        self.layout_editing = editing
 
 
 class PipeItem(QGraphicsPathItem):
@@ -220,11 +194,8 @@ class ManualSetpointWidget(QWidget):
     ) -> None:
         super().__init__()
         self._locked = False
-        self._layout_editing = False
-        self._drag_item: QGraphicsItem | None = None
-        self._drag_offset = QPointF()
         self.setObjectName("manualSetpoint")
-        self.setFixedSize(width, 106 if apply_button else 78)
+        self.setFixedSize(width, 120 if apply_button else 94)
         self.setStyleSheet(
             "QWidget#manualSetpoint{background:#F8FAFC;border:1px solid #7898B1;border-radius:5px;}"
             "QLabel{color:#10254A;font-weight:700;background:transparent;border:0;}"
@@ -237,6 +208,9 @@ class ManualSetpointWidget(QWidget):
         layout.setContentsMargins(9, 5, 9, 5)
         layout.setSpacing(3)
         heading = QLabel(title)
+        self.heading = heading
+        heading.setWordWrap(True)
+        heading.setMinimumHeight(28)
         heading.setFont(QFont("DejaVu Sans", 9, QFont.Weight.DemiBold))
         heading.setToolTip("Valor configurado manualmente; sem telemetria")
         layout.addWidget(heading)
@@ -265,19 +239,17 @@ class ManualSetpointWidget(QWidget):
             layout.addWidget(apply)
         self.spin.valueChanged.connect(self.value_changed)
 
+    def set_title(self, title: str) -> None:
+        self.heading.setText(title)
+
     def set_locked(self, locked: bool) -> None:
         self._locked = locked
-        self.setEnabled(not locked and not self._layout_editing)
+        self.setEnabled(not locked)
         self.setToolTip(
             "Bloqueado durante o ensaio: o snapshot das condições já foi registrado."
             if locked
             else "Valor configurado manualmente; sem telemetria"
         )
-
-    def set_layout_editing(self, editing: bool) -> None:
-        self._layout_editing = editing
-        self._drag_item = None
-        self.setEnabled(not self._locked and not editing)
 
 
 class ProcessSynoptic(QGraphicsView):
@@ -285,7 +257,6 @@ class ProcessSynoptic(QGraphicsView):
 
     instrument_clicked = Signal(str)
     setpoints_changed = Signal(float, float)
-    layout_changed = Signal(dict)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -313,9 +284,6 @@ class ProcessSynoptic(QGraphicsView):
         self._dash_offset = 0.0
         self._confinement_pressure = 150.0
         self._blanket_temperature = 60.0
-        self._layout_editing = False
-        self.layout_items: dict[str, QGraphicsItem] = {}
-        self._default_layout: dict[str, dict[str, float]] = {}
         self._build_scene()
         self.animation_timer = QTimer(self)
         self.animation_timer.setInterval(100)
@@ -353,8 +321,8 @@ class ProcessSynoptic(QGraphicsView):
             "valve": {"left": (2, 82), "right": (98, 82)},
         }
 
-        # Paths start empty and are routed after the equipment is created.
-        # Releasing a dragged component recalculates every connection.
+        # Paths start empty and are routed after the fixed equipment positions
+        # are created.
         self.pipe = PipeItem(QPainterPath())
         self.scene.addItem(self.pipe)
         self.confinement_pipe = QGraphicsPathItem(QPainterPath())
@@ -407,7 +375,6 @@ class ProcessSynoptic(QGraphicsView):
             )
             self.equipment_items[name] = item
             self.scene.addItem(item)
-            self._register_layout_item(f"equipment.{name}", item)
 
         labels = {
             "filter": self._add_label("REGULADORA", 958, 224, 145),
@@ -423,13 +390,11 @@ class ProcessSynoptic(QGraphicsView):
             "inlet": self._add_label("ENTRADA DO GÁS", 1080, 116, 112, align_left=True),
             "outlet": self._add_label("SAÍDA DO GÁS", 1077, 399, 112, align_left=True),
         }
-        for name, item in labels.items():
-            self._register_layout_item(f"label.{name}", item)
         self.discharge_label = self._add_label(
             "DESCARGA PARA ATMOSFERA", 320.9, 457, 280, align_left=True
         )
-        self._register_layout_item("label.discharge", self.discharge_label)
 
+        labels["blanket"].setPos(5.8, 101)
         self.instruments = {
             "flow": ValueOverlayItem(
                 "flow", "VAZÃO", QRectF(686.5, 8.9, 220, 78), self.instrument_clicked.emit
@@ -449,7 +414,6 @@ class ProcessSynoptic(QGraphicsView):
         }
         for name, item in self.instruments.items():
             self.scene.addItem(item)
-            self._register_layout_item(f"card.{name}", item)
 
         self.confinement_control = ManualSetpointWidget(
             "PRESSÃO DE CONFINAMENTO",
@@ -461,25 +425,24 @@ class ProcessSynoptic(QGraphicsView):
             width=240,
         )
         self.temperature_control = ManualSetpointWidget(
-            "TEMPERATURA DA MANTA",
+            "SETPOINT DE TEMPERATURA DA MANTA",
             "°C",
             self._blanket_temperature,
             0.0,
             200.0,
             width=215,
         )
+        self.confinement_control.set_title("SETPOINT DE PRESSÃO DE CONFINAMENTO")
         self.confinement_proxy = QGraphicsProxyWidget()
         self.confinement_proxy.setWidget(self.confinement_control)
-        self.confinement_proxy.setPos(3.2, 145.9)
+        self.confinement_proxy.setPos(3.2, 140)
         self.confinement_proxy.setZValue(12)
         self.scene.addItem(self.confinement_proxy)
-        self._register_layout_item("control.confinement", self.confinement_proxy)
         self.temperature_proxy = QGraphicsProxyWidget()
         self.temperature_proxy.setWidget(self.temperature_control)
         self.temperature_proxy.setPos(4.2, 7.7)
         self.temperature_proxy.setZValue(12)
         self.scene.addItem(self.temperature_proxy)
-        self._register_layout_item("control.temperature", self.temperature_proxy)
         self.confinement_control.value_changed.connect(self._setpoint_edited)
         self.temperature_control.value_changed.connect(self._setpoint_edited)
 
@@ -492,12 +455,8 @@ class ProcessSynoptic(QGraphicsView):
         # whole scene after positioning introduced gaps between pipes and SVG
         # connectors and made labels too small at common desktop resolutions.
         self.scene.setSceneRect(scene_rect)
-        self._default_layout = self.layout_positions()["items"]
         self._rebuild_connections()
         self._update_pipe("DISCONNECTED")
-
-    def _register_layout_item(self, name: str, item: QGraphicsItem) -> None:
-        self.layout_items[name] = item
 
     def _equipment_port(self, equipment: str, port: str) -> QPointF:
         local = self._equipment_port_map[equipment][port]
@@ -655,116 +614,6 @@ class ProcessSynoptic(QGraphicsView):
         self._confinement_pressure = self.confinement_control.spin.value()
         self._blanket_temperature = self.temperature_control.spin.value()
         self.setpoints_changed.emit(self._confinement_pressure, self._blanket_temperature)
-
-    def layout_positions(self) -> dict[str, Any]:
-        return {
-            "version": 1,
-            "items": {
-                name: {"x": round(item.pos().x(), 1), "y": round(item.pos().y(), 1)}
-                for name, item in self.layout_items.items()
-            },
-        }
-
-    def apply_layout(self, layout: dict[str, Any] | None) -> None:
-        if not isinstance(layout, dict):
-            return
-        items = layout.get("items", layout)
-        if not isinstance(items, dict):
-            return
-        for name, position in items.items():
-            item = self.layout_items.get(name)
-            if item is None or not isinstance(position, dict):
-                continue
-            try:
-                x = float(position["x"])
-                y = float(position["y"])
-            except (KeyError, TypeError, ValueError):
-                continue
-            if -200 <= x <= 1400 and -200 <= y <= 680:
-                item.setPos(x, y)
-        self._keep_layout_inside_scene()
-        self._rebuild_connections()
-
-    def reset_layout(self) -> None:
-        self.apply_layout({"version": 1, "items": self._default_layout})
-        self.layout_changed.emit(self.layout_positions())
-
-    def set_layout_editing(self, editing: bool) -> None:
-        self._layout_editing = editing
-        movable = QGraphicsItem.GraphicsItemFlag.ItemIsMovable
-        selectable = QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
-        for item in self.layout_items.values():
-            item.setFlag(movable, editing)
-            item.setFlag(selectable, editing)
-            if not editing:
-                item.setSelected(False)
-        for item in self.equipment_items.values():
-            item.set_layout_editing(editing)
-        for item in self.instruments.values():
-            item.set_layout_editing(editing)
-        self.confinement_control.set_layout_editing(editing)
-        self.temperature_control.set_layout_editing(editing)
-        self.viewport().setCursor(
-            Qt.CursorShape.OpenHandCursor if editing else Qt.CursorShape.ArrowCursor
-        )
-        if not editing:
-            self._keep_layout_inside_scene()
-            self._rebuild_connections()
-
-    def _keep_layout_inside_scene(self) -> None:
-        bounds = self.scene.sceneRect().adjusted(2, 2, -2, -2)
-        for item in self.layout_items.values():
-            item_bounds = item.sceneBoundingRect()
-            dx = 0.0
-            dy = 0.0
-            if item_bounds.left() < bounds.left():
-                dx = bounds.left() - item_bounds.left()
-            elif item_bounds.right() > bounds.right():
-                dx = bounds.right() - item_bounds.right()
-            if item_bounds.top() < bounds.top():
-                dy = bounds.top() - item_bounds.top()
-            elif item_bounds.bottom() > bounds.bottom():
-                dy = bounds.bottom() - item_bounds.bottom()
-            if dx or dy:
-                item.moveBy(dx, dy)
-
-    def mousePressEvent(self, event) -> None:  # noqa: N802
-        if self._layout_editing and event.button() == Qt.MouseButton.LeftButton:
-            scene_position = self.mapToScene(event.position().toPoint())
-            candidates = sorted(
-                self.layout_items.values(), key=lambda item: item.zValue(), reverse=True
-            )
-            for item in candidates:
-                if item.sceneBoundingRect().contains(scene_position):
-                    for other in self.layout_items.values():
-                        other.setSelected(False)
-                    item.setSelected(True)
-                    self._drag_item = item
-                    self._drag_offset = scene_position - item.pos()
-                    self.viewport().setCursor(Qt.CursorShape.ClosedHandCursor)
-                    event.accept()
-                    return
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event) -> None:  # noqa: N802
-        if self._layout_editing and self._drag_item is not None:
-            scene_position = self.mapToScene(event.position().toPoint())
-            self._drag_item.setPos(scene_position - self._drag_offset)
-            self._rebuild_connections()
-            event.accept()
-            return
-        super().mouseMoveEvent(event)
-
-    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
-        if self._layout_editing and self._drag_item is not None:
-            self._keep_layout_inside_scene()
-            self._rebuild_connections()
-            self.layout_changed.emit(self.layout_positions())
-            self._drag_item = None
-            self.viewport().setCursor(Qt.CursorShape.OpenHandCursor)
-            event.accept()
-            return
-        super().mouseReleaseEvent(event)
 
     def set_setpoints(self, confinement_pressure_psi: float, blanket_temperature_c: float) -> None:
         for control, value in (

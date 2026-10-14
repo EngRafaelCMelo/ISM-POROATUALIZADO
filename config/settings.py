@@ -71,8 +71,15 @@ class ConfigManager:
                     aliases = {"endereco_escravo": "slave_id"}
                     for key, value in legacy_flow.items():
                         migrated_flow.setdefault(aliases.get(key, key), value)
+                old_interface = user_config.get("interface")
+                removed_layout = (
+                    isinstance(old_interface, dict)
+                    and old_interface.pop("sinotico_layout", None) is not None
+                )
                 self._migration_required = bool(
-                    {"vazao_baixa", "vazao_alta"}.intersection(user_sensors) or legacy_flow
+                    {"vazao_baixa", "vazao_alta"}.intersection(user_sensors)
+                    or legacy_flow
+                    or removed_layout
                 )
                 if "vazao" not in user_sensors and "vazao_baixa" in user_sensors:
                     user_sensors["vazao"] = dict(user_sensors["vazao_baixa"])
@@ -238,13 +245,14 @@ class ConfigManager:
                 source.backup(destination)
         return target
 
-    def backup_database(self) -> Path | None:
+    def backup_database(self, destination_dir: Path | None = None) -> Path | None:
         source = self.database_path
         if not source.exists():
             return None
-        backup_dir = self.paths.data / "backups"
-        backup_dir.mkdir(exist_ok=True)
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        configured = self.get("dados.diretorio_backups", "")
+        backup_dir = Path(destination_dir or configured or self.paths.data / "backups")
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         target = backup_dir / f"{source.stem}_backup_{stamp}{source.suffix}"
         with (
             sqlite3.connect(source) as source_connection,
@@ -254,11 +262,60 @@ class ConfigManager:
             result = target_connection.execute("PRAGMA integrity_check").fetchone()
             if not result or result[0] != "ok":
                 raise OSError("Falha na verificação de integridade do backup SQLite")
+        source_connection.close()
+        target_connection.close()
         keep = max(1, int(self.get("dados.retencao_backups", 10)))
         backups = sorted(backup_dir.glob(f"{source.stem}_backup_*{source.suffix}"), reverse=True)
         for old_backup in backups[keep:]:
             old_backup.unlink(missing_ok=True)
         return target
+
+    def list_backups(self, destination_dir: Path | None = None) -> list[Path]:
+        configured = self.get("dados.diretorio_backups", "")
+        backup_dir = Path(destination_dir or configured or self.paths.data / "backups")
+        if not backup_dir.exists():
+            return []
+        return sorted(
+            backup_dir.glob(f"{self.database_path.stem}_backup_*{self.database_path.suffix}"),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+
+    @staticmethod
+    def validate_backup(path: Path) -> None:
+        path = Path(path)
+        if not path.is_file():
+            raise ValueError("O arquivo de backup não existe")
+        connection = sqlite3.connect(path)
+        try:
+            integrity = connection.execute("PRAGMA integrity_check").fetchone()
+            has_schema = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='ensaios'"
+            ).fetchone()
+        except sqlite3.Error as exc:
+            raise ValueError(f"O arquivo selecionado não é um banco SQLite válido: {exc}") from exc
+        finally:
+            connection.close()
+        if not integrity or integrity[0] != "ok" or not has_schema:
+            raise ValueError("O backup foi reprovado na verificação de integridade")
+
+    def restore_database(self, backup_path: Path) -> Path | None:
+        backup_path = Path(backup_path)
+        self.validate_backup(backup_path)
+        source = self.database_path
+        safety_backup = self.backup_database() if source.exists() else None
+        temporary = source.with_name(f".{source.name}.restore.tmp")
+        try:
+            if backup_path.resolve() == source.resolve():
+                raise ValueError("Selecione um arquivo de backup diferente do banco atual")
+            shutil.copy2(backup_path, temporary)
+            self.validate_backup(temporary)
+            os.replace(temporary, source)
+            self.validate_backup(source)
+        except Exception:
+            temporary.unlink(missing_ok=True)
+            raise
+        return safety_backup
 
     def real_mode_errors(self) -> list[str]:
         """Retorna parâmetros obrigatórios ausentes sem inventar dados do equipamento."""

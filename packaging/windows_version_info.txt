@@ -14,11 +14,11 @@ VSVersionInfo(
       StringTable('041604B0', [
         StringStruct('CompanyName', 'ISM Engineering Systems'),
         StringStruct('FileDescription', 'Supervisório ISM - Permeabilímetro'),
-        StringStruct('FileVersion', '2.3.0'),
+        StringStruct('FileVersion', '2.4.0'),
         StringStruct('InternalName', 'PermeabilimetroSupervisorio'),
         StringStruct('OriginalFilename', 'PermeabilimetroSupervisorio_v2_3_0.exe'),
         StringStruct('ProductName', 'Supervisório ISM - Permeabilímetro'),
-        StringStruct('ProductVersion', '2.3.0')
+        StringStruct('ProductVersion', '2.4.0')
       ])
     ]),
     VarFileInfo([VarStruct('Translation', [1046, 1200])])

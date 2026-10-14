@@ -162,8 +162,8 @@ def test_real_pdf_has_logo_unicode_fonts_and_no_internal_names(tmp_path) -> None
     assert "RELATÓRIO DEMONSTRATIVO" not in text
     assert "Condições operacionais do ensaio" in text
     normalized = re.sub(r"\s+", " ", text)
-    assert "Temperatura configurada da manta térmica" in normalized
-    assert "Pressão de confinamento configurada" in normalized
+    assert "SETPOINT DE TEMPERATURA DA MANTA" in normalized
+    assert "SETPOINT DE PRESSÃO DE CONFINAMENTO" in normalized
     assert "150,0 psi (setpoint manual)" in normalized
     assert "á à â ã é ê í ó ô õ ú ç ° ² Δ ∞ × R²" in text
     assert not any(name in text for name in FORBIDDEN_INTERNAL_NAMES)

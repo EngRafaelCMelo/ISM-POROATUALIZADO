@@ -557,11 +557,11 @@ class ExportService:
         )
         rows = [
             [
-                "Temperatura configurada da manta térmica",
+                "SETPOINT DE TEMPERATURA DA MANTA",
                 temperature,
             ],
             [
-                "Pressão de confinamento configurada",
+                "SETPOINT DE PRESSÃO DE CONFINAMENTO",
                 confinement,
             ],
             ["Gás utilizado", self._text(test["tipo_gas"])],
@@ -804,7 +804,7 @@ class ExportService:
             NOT_AVAILABLE
         ]
 
-    def _events(self, alarms, markers, styles):
+    def _events(self, alarms, markers, styles, events=None):
         elements = [Paragraph("7. Ocorrências e registros do operador", styles["Section"])]
         records: list[tuple[Any, str, Any]] = []
         for record in alarms.to_dict(orient="records"):
@@ -826,6 +826,9 @@ class ExportService:
             category = str(record.get("categoria") or "").casefold()
             kind = "Encerramento" if "encerr" in category else "Operação"
             records.append((record.get("timestamp"), kind, record.get("comentario")))
+        for record in events.to_dict(orient="records") if events is not None else []:
+            category = str(record.get("categoria") or "Registro")
+            records.append((record.get("timestamp"), category, record.get("mensagem")))
         records.sort(key=lambda item: str(item[0] or ""))
         if not records:
             elements.append(Paragraph("Nenhuma ocorrência registrada.", styles["BodyText"]))
@@ -846,6 +849,7 @@ class ExportService:
 
     def export_pdf(self, test_id: int, directory: Path) -> Path:
         test, measurements, alarms, markers, calculations = self._data(test_id)
+        events = pd.DataFrame([dict(row) for row in self.events.events(test_id)])
         measurements = self._current_measurements(measurements)
         target = self._safe_target(directory, f"{test['codigo']}_relatorio_final.pdf")
         styles = self._styles()
@@ -888,7 +892,7 @@ class ExportService:
                 else INSUFFICIENT_DATA_MESSAGE
             )
             story.extend(self._chart_elements(title, charts[key], styles, 72, missing))
-        story.extend(self._events(alarms, markers, styles))
+        story.extend(self._events(alarms, markers, styles, events))
         notes = test["observacao_final"] or test["observacoes"] or "Sem observações finais."
         story.extend(
             [

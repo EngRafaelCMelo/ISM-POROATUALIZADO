@@ -153,12 +153,72 @@ class TestRepository:
             )
 
     def mark_interrupted_tests(self) -> int:
+        candidates = self.active_tests()
+        for row in candidates:
+            self.mark_interrupted(int(row["id"]))
+        return len(candidates)
+
+    def active_tests(self) -> list[sqlite3.Row]:
+        with self.db.read_connection() as con:
+            return con.execute(
+                """SELECT * FROM ensaios
+                   WHERE status IN (?, ?) ORDER BY inicio""",
+                (TestStatus.RUNNING.value, TestStatus.PAUSED.value),
+            ).fetchall()
+
+    def mark_interrupted(
+        self, test_id: int, reason: str = "Aplicativo encerrado inesperadamente"
+    ) -> None:
+        now = datetime.now().isoformat()
         with self.db.transaction() as con:
-            cur = con.execute(
-                "UPDATE ensaios SET status=? WHERE status IN (?,?)",
-                (TestStatus.INTERRUPTED.value, TestStatus.RUNNING.value, TestStatus.PAUSED.value),
+            row = con.execute("SELECT status FROM ensaios WHERE id=?", (test_id,)).fetchone()
+            if not row:
+                raise ValueError("Ensaio não encontrado")
+            if row["status"] not in (TestStatus.RUNNING.value, TestStatus.PAUSED.value):
+                return
+            con.execute(
+                "UPDATE ensaios SET status=? WHERE id=?",
+                (TestStatus.INTERRUPTED.value, test_id),
             )
-            return cur.rowcount
+            con.execute(
+                "INSERT INTO eventos(ensaio_id,timestamp,categoria,mensagem,detalhes) VALUES(?,?,?,?,?)",
+                (test_id, now, "interrupção", reason, "status=interrompido"),
+            )
+
+    def recover(self, test_id: int) -> None:
+        now = datetime.now().isoformat()
+        with self.db.transaction() as con:
+            row = con.execute("SELECT status FROM ensaios WHERE id=?", (test_id,)).fetchone()
+            if not row or row["status"] != TestStatus.INTERRUPTED.value:
+                raise ValueError("O ensaio não está disponível para recuperação")
+            con.execute(
+                "UPDATE ensaios SET status=?, fim=NULL WHERE id=?",
+                (TestStatus.RUNNING.value, test_id),
+            )
+            con.execute(
+                "INSERT INTO eventos(ensaio_id,timestamp,categoria,mensagem,detalhes) VALUES(?,?,?,?,?)",
+                (
+                    test_id,
+                    now,
+                    "recuperação",
+                    "Ensaio recuperado pelo operador",
+                    "status=em_andamento",
+                ),
+            )
+
+    def finish_interrupted(self, test_id: int, note: str = "") -> None:
+        self.finish(test_id, note or "Encerrado pelo operador após interrupção")
+        with self.db.transaction() as con:
+            con.execute(
+                "INSERT INTO eventos(ensaio_id,timestamp,categoria,mensagem,detalhes) VALUES(?,?,?,?,?)",
+                (
+                    test_id,
+                    datetime.now().isoformat(),
+                    "encerramento_interrupção",
+                    "Ensaio interrompido encerrado pelo operador",
+                    note,
+                ),
+            )
 
     def list(self, search: str = "") -> list[sqlite3.Row]:
         with self.db.read_connection() as con:
@@ -205,6 +265,12 @@ class EventRepository:
         with self.db.read_connection() as con:
             return con.execute(
                 "SELECT * FROM marcacoes WHERE ensaio_id=? ORDER BY timestamp", (test_id,)
+            ).fetchall()
+
+    def events(self, test_id: int) -> list[sqlite3.Row]:
+        with self.db.read_connection() as con:
+            return con.execute(
+                "SELECT * FROM eventos WHERE ensaio_id=? ORDER BY timestamp", (test_id,)
             ).fetchall()
 
     def add_alarm(self, test_id: int | None, alarm: Alarm) -> int:

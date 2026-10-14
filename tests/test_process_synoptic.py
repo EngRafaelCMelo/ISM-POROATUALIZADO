@@ -3,9 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 import pytest
-from PySide6.QtCore import QPoint, QSize, Qt
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QGraphicsItem
+from PySide6.QtCore import QSize
 
 from core.constants import ReadingQuality
 from core.models import SensorReading
@@ -142,50 +140,22 @@ def test_holder_pipes_end_at_svg_ports_and_discharge_label_stays_clear(qt_applic
     widget.close()
 
 
-def test_layout_editor_moves_items_and_reconnects_holder_pipes(qt_application) -> None:
+def test_synoptic_positions_are_fixed_and_items_are_not_movable(qt_application) -> None:
     widget = ProcessSynoptic()
-    original_inlet = widget.holder_ports["inlet"]
-    widget.set_layout_editing(True)
-    movable = QGraphicsItem.GraphicsItemFlag.ItemIsMovable
-    assert all(item.flags() & movable for item in widget.layout_items.values())
-    assert not widget.confinement_control.isEnabled()
-
-    widget.equipment_items["sample"].moveBy(24, -12)
-    widget._rebuild_connections()
-    assert widget.holder_ports["inlet"] == pytest.approx(
-        (original_inlet[0] + 24, original_inlet[1] - 12)
-    )
-
-    saved = widget.layout_positions()
-    restored = ProcessSynoptic()
-    restored.apply_layout(saved)
-    assert restored.equipment_items["sample"].pos() == widget.equipment_items["sample"].pos()
-    assert restored.holder_ports["inlet"] == pytest.approx(widget.holder_ports["inlet"])
-
-    restored.reset_layout()
-    assert restored.equipment_items["sample"].pos().x() == 436.5
-    assert restored.equipment_items["sample"].pos().y() == 315.8
+    movable = widget.equipment_items["sample"].flags().ItemIsMovable
+    assert not widget.equipment_items["sample"].flags() & movable
+    assert not hasattr(widget, "layout_items")
+    assert widget.equipment_items["sample"].pos().x() == 436.5
+    assert widget.equipment_items["sample"].pos().y() == 315.8
     widget.close()
-    restored.close()
 
 
-def test_layout_editor_can_drag_embedded_setpoint_control(qt_application) -> None:
+def test_setpoint_controls_are_not_layout_editors(qt_application) -> None:
     widget = ProcessSynoptic()
-    widget.resize(1200, 480)
-    widget.show()
-    qt_application.processEvents()
-    widget.set_layout_editing(True)
-    control = widget.confinement_proxy
-    before = control.pos()
-    start = widget.mapFromScene(control.sceneBoundingRect().center())
-    target = start + QPoint(24, 12)
-
-    QTest.mousePress(widget.viewport(), Qt.MouseButton.LeftButton, pos=start)
-    QTest.mouseMove(widget.viewport(), target, 50)
-    QTest.mouseRelease(widget.viewport(), Qt.MouseButton.LeftButton, pos=target)
-    qt_application.processEvents()
-
-    assert control.pos() != before
+    assert widget.confinement_control.isEnabled()
+    assert widget.temperature_control.isEnabled()
+    assert "SETPOINT" in widget.confinement_control.heading.text()
+    assert "SETPOINT" in widget.temperature_control.heading.text()
     widget.close()
 
 
@@ -195,7 +165,6 @@ def test_synoptic_missing_sensor_and_resource(qt_application) -> None:
     assert not widget.animation_running
     assert len(widget.equipment_items) == 6
     assert "regulator" not in widget.equipment_items
-    assert "card.local_reading" not in widget.layout_items
     assert all(
         item.__class__.__name__ == "EquipmentItem" for item in widget.equipment_items.values()
     )

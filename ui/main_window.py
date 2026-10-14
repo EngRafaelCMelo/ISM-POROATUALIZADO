@@ -40,7 +40,7 @@ from communication.serial_manager import (
 from communication.simulator import SimulatorWorker
 from config.settings import AppPaths, ConfigManager
 from core.constants import Severity, TestStatus
-from core.models import Alarm, Measurement
+from core.models import Alarm, Measurement, TestSession
 from core.version import APP_NAME, APP_VERSION
 from database.database import Database
 from database.repositories import (
@@ -50,6 +50,7 @@ from database.repositories import (
     TestRepository,
 )
 from services.acquisition_service import AcquisitionService
+from services.alarm_service import AlarmSoundController
 from services.export_service import ExportService
 from services.preflight_service import run_preflight
 from services.test_service import TestService
@@ -97,19 +98,28 @@ class MainWindow(QMainWindow):
         self.exporting_test_ids: set[int] = set()
         self.message_times: deque[datetime] = deque(maxlen=20)
         self.calculation_test_id: int | None = None
+        self.alarm_sound = AlarmSoundController(
+            bool(self.config.get("dados.sinal_sonoro_alarme", True)),
+            float(self.config.get("dados.sinal_sonoro_cooldown_s", 5.0)),
+        )
 
-        interrupted = self.test_repository.mark_interrupted_tests()
-        if interrupted:
-            logger.warning("%s ensaio(s) anterior(es) marcado(s) como interrompido(s)", interrupted)
+        self._startup_interrupted_ids = [
+            int(row["id"]) for row in self.test_repository.active_tests()
+        ]
+        for test_id in self._startup_interrupted_ids:
+            self.test_repository.mark_interrupted(test_id)
         self._build_ui()
         self._connect_signals()
         self._load_style()
         self._refresh_ports()
         self._refresh_history()
+        self._refresh_backups()
         self._setup_timers()
         self.setWindowTitle(APP_NAME)
         self.resize(1500, 920)
         self.setMinimumSize(960, 600)
+        if self._startup_interrupted_ids:
+            QTimer.singleShot(0, self._resolve_interrupted_tests)
 
     def _build_ui(self) -> None:
         root = QWidget()
@@ -322,7 +332,6 @@ class MainWindow(QMainWindow):
             ),
             float(self.config.get("condicoes_operacionais.temperatura_manta_setpoint_c", 60.0)),
         )
-        self.overview.synoptic.apply_layout(self.config.get("interface.sinotico_layout", {}))
         self.test_page = TestPage()
         self.calculations = CalculationPage(self.config.data)
         self.graphs = GraphsPage()
@@ -371,8 +380,6 @@ class MainWindow(QMainWindow):
             page.marker_requested.connect(self._add_marker)
         self.overview.acknowledge_requested.connect(self._acknowledge_alarm)
         self.overview.synoptic.setpoints_changed.connect(self._store_operational_setpoints)
-        self.overview.layout_save_requested.connect(self._save_synoptic_layout)
-        self.overview.layout_reset_requested.connect(self._reset_synoptic_layout)
         self.graphs.export_requested.connect(self._export_graph_png)
         self.calculations.save_requested.connect(self._save_calculation)
         self.history.search_requested.connect(self._refresh_history)
@@ -383,6 +390,9 @@ class MainWindow(QMainWindow):
         self.calibration.save_requested.connect(self._save_calibration)
         self.calibration.sensor.currentIndexChanged.connect(self._refresh_calibration_history)
         self.settings.save_requested.connect(self._save_settings)
+        self.settings.backup_choose_requested.connect(self._choose_backup_directory)
+        self.settings.backup_now_requested.connect(self._create_backup_now)
+        self.settings.backup_restore_requested.connect(self._restore_backup)
         self.diagnostics.copy_requested.connect(self._copy_diagnostics)
         self.diagnostics.reset_requested.connect(self.acquisition.reset_counters)
         self.diagnostics.db_test_requested.connect(self._test_database)
@@ -751,6 +761,13 @@ class MainWindow(QMainWindow):
     def _on_alarm(self, alarm: Alarm | None) -> None:
         if alarm is None:
             return
+        if self.alarm_sound.should_sound(alarm):
+            try:
+                QApplication.beep()
+            except Exception:
+                logger.debug(
+                    "Aviso sonoro indisponível; aquisição continua normalmente", exc_info=True
+                )
         try:
             test_id = self.test_service.current.id if self.test_service.current else None
             alarm_id = self.event_repository.add_alarm(test_id, alarm)
@@ -762,6 +779,73 @@ class MainWindow(QMainWindow):
                 self._set_badge(self.equipment_badge, "Atenção", "warn")
         except Exception:
             logger.exception("Não foi possível persistir o alarme")
+
+    def _activate_recovered_session(self, session: TestSession) -> None:
+        self.overview.synoptic.set_setpoints(
+            session.definition.confinement_pressure_setpoint_psi or 0.0,
+            session.definition.temperature_c,
+        )
+        self.graphs.reset()
+        self.graphs.set_units(session.definition.pressure_unit, session.definition.flow_unit)
+        self.test_page.reset()
+        self.test_page.set_session(session)
+        self.calculations.set_session(session.definition, "active")
+        self.calculation_test_id = session.id
+        self.overview.reset_test()
+        self.overview.samples.setText(str(session.sample_count))
+        self.overview.set_test_active(True)
+        self.overview.synoptic.set_sample(session.definition.code, session.definition.sample_name)
+        self.current_test_label.setText(
+            f"{session.definition.code} — {session.definition.sample_name}"
+        )
+        self._navigate(0)
+        self.nav_by_page[0].setChecked(True)
+
+    def _resolve_interrupted_tests(self) -> None:
+        """Exige uma decisão explícita para cada ensaio deixado em andamento."""
+        for test_id in self._startup_interrupted_ids:
+            row = self.test_repository.get(test_id)
+            if not row or row["status"] != TestStatus.INTERRUPTED.value:
+                continue
+            while True:
+                dialog = QMessageBox(self)
+                dialog.setIcon(QMessageBox.Icon.Warning)
+                dialog.setWindowTitle("Ensaio interrompido")
+                dialog.setText(f"O ensaio {row['codigo']} foi interrompido inesperadamente.")
+                dialog.setInformativeText(
+                    f"Amostra: {row['amostra_nome']}\n"
+                    f"Medições preservadas: {len(self.test_repository.measurements(test_id))}\n\n"
+                    "Escolha como registrar a continuidade deste ensaio."
+                )
+                recover = dialog.addButton("Recuperar ensaio", QMessageBox.ButtonRole.AcceptRole)
+                finish = dialog.addButton("Encerrar ensaio", QMessageBox.ButtonRole.DestructiveRole)
+                if self.test_service.current:
+                    recover.setEnabled(False)
+                    dialog.setInformativeText(
+                        dialog.informativeText()
+                        + "\n\nJá existe outro ensaio recuperado; encerre este registro interrompido."
+                    )
+                dialog.exec()
+                clicked = dialog.clickedButton()
+                if clicked is recover and not self.test_service.current:
+                    definition = self._definition_from_record(row)
+                    session = TestSession(
+                        test_id,
+                        definition,
+                        TestStatus.INTERRUPTED,
+                        datetime.fromisoformat(row["inicio"]),
+                        sample_count=len(self.test_repository.measurements(test_id)),
+                    )
+                    try:
+                        self._activate_recovered_session(self.test_service.recover(session))
+                    except (RuntimeError, ValueError) as exc:
+                        QMessageBox.critical(self, "Recuperação", str(exc))
+                        continue
+                    break
+                if clicked is finish:
+                    self.test_repository.finish_interrupted(test_id)
+                    self._refresh_history()
+                    break
 
     def _on_timeout(self, message: str) -> None:
         self._set_badge(self.equipment_badge, "Sem comunicação", "bad")
@@ -786,24 +870,6 @@ class MainWindow(QMainWindow):
                 "Os dados não vêm do equipamento real e o relatório será marcado como SIMULADO. Continuar?",
             )
             if response != QMessageBox.StandardButton.Yes:
-                return
-        else:
-            preflight = run_preflight(
-                self.config.data,
-                self.acquisition.preflight_snapshot(),
-                esp32_connected=self.connected,
-                flowmeter_connected=self.flow_connected,
-                database_writable=self.database.writable_check(),
-                configuration_errors=self.config.real_mode_errors(),
-                calibration_available=self.calibration_repository.active_exists("pressao"),
-            )
-            if not preflight.ok:
-                QMessageBox.critical(
-                    self,
-                    "Preflight reprovado",
-                    "Corrija os itens abaixo antes do ensaio real:\n\n• "
-                    + "\n• ".join(preflight.errors),
-                )
                 return
         confinement_setpoint, temperature_setpoint = self.overview.synoptic.setpoints()
         dialog = TestSetupDialog(
@@ -834,6 +900,46 @@ class MainWindow(QMainWindow):
             return
         try:
             definition = dialog.definition()
+            if not self.simulating:
+                report_directory = Path(definition.export_directory).expanduser()
+                try:
+                    report_directory.mkdir(parents=True, exist_ok=True)
+                    report_available = report_directory.is_dir() and os.access(
+                        report_directory, os.W_OK
+                    )
+                except OSError:
+                    report_available = False
+                preflight = run_preflight(
+                    self.config.data,
+                    self.acquisition.preflight_snapshot(),
+                    esp32_connected=self.connected,
+                    flowmeter_connected=self.flow_connected,
+                    database_writable=self.database.writable_check(),
+                    configuration_errors=self.config.real_mode_errors(),
+                    calibration_available=self.calibration_repository.active_exists("pressao"),
+                    communication_stable=bool(self.connected and self.flow_connected),
+                    sample_selected=bool(definition.sample_name.strip()),
+                    required_parameters_filled=bool(
+                        definition.code.strip()
+                        and definition.operator.strip()
+                        and definition.flow_unit
+                        and definition.pressure_unit
+                    ),
+                    confinement_pressure_setpoint=definition.confinement_pressure_setpoint_psi,
+                    blanket_temperature_setpoint=definition.temperature_c,
+                    report_path_available=report_available,
+                )
+                checklist = "\n".join(
+                    f"{'OK' if item.ok else 'ERRO'} — {item.name}: {item.detail}"
+                    for item in preflight.checks
+                )
+                if not preflight.ok:
+                    QMessageBox.critical(
+                        self,
+                        "Preflight reprovado",
+                        "Corrija os itens abaixo antes do ensaio real:\n\n" + checklist,
+                    )
+                    return
             # O diálogo e o sinótico compartilham a mesma fonte enquanto não
             # há ensaio. A definição criada abaixo é o snapshot imutável.
             self.overview.synoptic.set_setpoints(
@@ -907,16 +1013,6 @@ class MainWindow(QMainWindow):
             blanket_temperature_c,
         )
         self.config.save()
-
-    def _save_synoptic_layout(self, layout: dict) -> None:
-        if self.test_service.current:
-            return
-        self.config.set("interface.sinotico_layout", layout)
-
-    def _reset_synoptic_layout(self) -> None:
-        if self.test_service.current:
-            return
-        self.config.set("interface.sinotico_layout", {})
 
     def _finish_test(self) -> None:
         if not self.test_service.current:
@@ -993,6 +1089,14 @@ class MainWindow(QMainWindow):
         )
         if accepted:
             self.event_repository.acknowledge(alarm_id, note)
+            active = self.event_repository.alarms(
+                self.test_service.current.id if self.test_service.current else None,
+                only_active=True,
+            )
+            critical_values = {Severity.CRITICAL.value, "crítico", "critical"}
+            self.overview.synoptic.set_critical_alarm(
+                any(row["severidade"] in critical_values for row in active)
+            )
 
     def _refresh_history(self, search: str = "") -> None:
         self.history.populate(self.test_repository.list(search))
@@ -1203,10 +1307,85 @@ class MainWindow(QMainWindow):
         if sensor:
             self.calibration.populate_history(self.calibration_repository.history(sensor))
 
+    def _backup_directory_from_ui(self) -> Path | None:
+        value = self.settings.backup_path.text().strip()
+        return Path(value).expanduser() if value else None
+
+    def _refresh_backups(self) -> None:
+        try:
+            self.settings.set_backups(
+                [str(path) for path in self.config.list_backups(self._backup_directory_from_ui())]
+            )
+        except OSError:
+            self.settings.set_backups([])
+
+    def _choose_backup_directory(self) -> None:
+        selected = QFileDialog.getExistingDirectory(
+            self,
+            "Destino dos backups",
+            str(self._backup_directory_from_ui() or self.paths.data / "backups"),
+        )
+        if selected:
+            self.settings.backup_path.setText(selected)
+            self.statusBar().showMessage(
+                "Destino de backup selecionado; salve as configurações", 4000
+            )
+
+    def _create_backup_now(self) -> None:
+        try:
+            target = self.config.backup_database(self._backup_directory_from_ui())
+            if target is None:
+                raise OSError("O banco de dados ainda não existe")
+            self._refresh_backups()
+            QMessageBox.information(self, "Backup", f"Backup criado com sucesso em:\n{target}")
+        except (OSError, ValueError) as exc:
+            QMessageBox.critical(self, "Falha no backup", str(exc))
+
+    def _restore_backup(self, selected_path: str) -> None:
+        if self.test_service.current:
+            QMessageBox.warning(
+                self,
+                "Restauração bloqueada",
+                "Finalize o ensaio ativo antes de restaurar um backup.",
+            )
+            return
+        backup = Path(selected_path)
+        response = QMessageBox.question(
+            self,
+            "Restaurar backup",
+            f"Restaurar o banco a partir de:\n{backup}\n\n"
+            "O banco atual será salvo automaticamente antes da troca. Continuar?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if response != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self.database.close()
+            safety = self.config.restore_database(backup)
+            self.database.initialize()
+            self._refresh_history()
+            self._refresh_backups()
+            detail = f"\nBackup de segurança: {safety}" if safety else ""
+            QMessageBox.information(
+                self, "Backup restaurado", "Banco restaurado com sucesso." + detail
+            )
+        except (OSError, ValueError) as exc:
+            try:
+                self.database.initialize()
+            except Exception:
+                logger.exception("Não foi possível reabrir o banco após falha de restauração")
+            QMessageBox.critical(self, "Falha na restauração", str(exc))
+
     def _save_settings(self, values: dict[str, Any]) -> None:
         try:
             ConfigManager._deep_update(self.config.data, values)
             self.config.save()
+            self.alarm_sound.configure(
+                bool(self.config.get("dados.sinal_sonoro_alarme", True)),
+                float(self.config.get("dados.sinal_sonoro_cooldown_s", 5.0)),
+            )
+            self._refresh_backups()
             self.graphs.set_units(
                 str(self.config.get("sensores.pressao.unidade", "psi")),
                 str(self.config.get("sensores.vazao.unidade", "NL/min")),

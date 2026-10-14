@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QListWidget,
     QPlainTextEdit,
     QPushButton,
     QSpinBox,
@@ -71,8 +72,6 @@ class OverviewPage(QWidget):
     finish_requested = Signal()
     marker_requested = Signal()
     acknowledge_requested = Signal(int)
-    layout_save_requested = Signal(dict)
-    layout_reset_requested = Signal()
 
     def __init__(self, sensor_config: dict[str, dict[str, Any]]):
         super().__init__()
@@ -106,24 +105,11 @@ class OverviewPage(QWidget):
         title.setObjectName("sectionTitle")
         self.synoptic_hint = QLabel("Clique nos instrumentos para detalhes")
         self.synoptic_hint.setObjectName("muted")
-        self.layout_edit_button = QPushButton("Editar layout")
-        self.layout_edit_button.setObjectName("quiet")
-        self.layout_edit_button.setCheckable(True)
-        self.layout_edit_button.setToolTip(
-            "Arraste equipamentos, caixas e nomes; clique novamente para salvar"
-        )
-        self.layout_reset_button = QPushButton("Restaurar")
-        self.layout_reset_button.setObjectName("quiet")
-        self.layout_reset_button.setToolTip("Restaurar a disposição original do sinótico")
         synoptic_header.addWidget(title)
         synoptic_header.addStretch()
         synoptic_header.addWidget(self.synoptic_hint)
-        synoptic_header.addWidget(self.layout_edit_button)
-        synoptic_header.addWidget(self.layout_reset_button)
         synoptic_layout.addLayout(synoptic_header)
         self.synoptic = ProcessSynoptic()
-        self.layout_edit_button.toggled.connect(self._toggle_layout_editing)
-        self.layout_reset_button.clicked.connect(self._reset_layout)
         synoptic_layout.addWidget(self.synoptic, 1)
         outer.addWidget(synoptic_card, 1)
 
@@ -252,23 +238,6 @@ class OverviewPage(QWidget):
         self.update_pressure(measurement.pressure)
         self.update_flow(measurement.flow)
 
-    def _toggle_layout_editing(self, editing: bool) -> None:
-        self.synoptic.set_layout_editing(editing)
-        self.start_button.setEnabled(not editing)
-        self.layout_edit_button.setText("Salvar layout" if editing else "Editar layout")
-        self.layout_reset_button.setEnabled(not editing)
-        self.synoptic_hint.setText(
-            "Arraste os itens para reposicionar"
-            if editing
-            else "Clique nos instrumentos para detalhes"
-        )
-        if not editing:
-            self.layout_save_requested.emit(self.synoptic.layout_positions())
-
-    def _reset_layout(self) -> None:
-        self.synoptic.reset_layout()
-        self.layout_reset_requested.emit()
-
     def update_pressure(self, reading: SensorReading) -> None:
         self.cards["pressao"].update_reading(reading)
         self.synoptic.update_pressure(reading)
@@ -295,10 +264,6 @@ class OverviewPage(QWidget):
         self._flow.append(float("nan") if reading.value is None else reading.value)
 
     def set_test_active(self, active: bool, paused: bool = False) -> None:
-        if active and self.layout_edit_button.isChecked():
-            self.layout_edit_button.setChecked(False)
-        self.layout_edit_button.setEnabled(not active)
-        self.layout_reset_button.setEnabled(not active and not self.layout_edit_button.isChecked())
         self.start_button.setEnabled(not active)
         self.pause_button.setEnabled(active)
         self.finish_button.setEnabled(active)
@@ -1318,6 +1283,9 @@ class CalibrationPage(QWidget):
 
 class SettingsPage(QWidget):
     save_requested = Signal(dict)
+    backup_choose_requested = Signal()
+    backup_now_requested = Signal()
+    backup_restore_requested = Signal(str)
 
     def __init__(self, config: dict[str, Any]):
         super().__init__()
@@ -1491,15 +1459,47 @@ class SettingsPage(QWidget):
         self.backup = QCheckBox()
         self.backup.setChecked(config["dados"].get("backup_automatico", True))
         self.sound = QCheckBox()
+        self.sound.setChecked(config["dados"].get("sinal_sonoro_alarme", True))
+        self.backup_path = QLineEdit(config["dados"].get("diretorio_backups", ""))
+        self.backup_path.setPlaceholderText("Padrão: data/backups")
+        choose_backup = QPushButton("Escolher…")
+        choose_backup.clicked.connect(self.backup_choose_requested)
+        backup_path_row = QHBoxLayout()
+        backup_path_row.addWidget(self.backup_path)
+        backup_path_row.addWidget(choose_backup)
+        self.backup_now_button = QPushButton("Criar backup agora")
+        self.backup_now_button.clicked.connect(self.backup_now_requested)
+        self.backup_list = QListWidget()
+        self.backup_list.setMinimumHeight(70)
+        self.backup_restore_button = QPushButton("Restaurar backup selecionado")
+        self.backup_restore_button.setEnabled(False)
+        self.backup_restore_button.clicked.connect(self._restore_selected_backup)
+        self.backup_list.currentRowChanged.connect(
+            lambda row: self.backup_restore_button.setEnabled(row >= 0)
+        )
         data_form.addRow("Diretório de exportação", self.export_path)
         data_form.addRow("Separador CSV", self.separator)
         data_form.addRow("Backup automático", self.backup)
         data_form.addRow("Sinal sonoro de alarme", self.sound)
+        data_form.addRow("Destino dos backups", backup_path_row)
+        data_form.addRow(self.backup_now_button)
+        data_form.addRow("Backups recentes", self.backup_list)
+        data_form.addRow(self.backup_restore_button)
         tabs.addTab(data, "Dados")
         save = QPushButton("Salvar configurações")
         save.setObjectName("primary")
         save.clicked.connect(self._save)
         layout.addWidget(save, alignment=Qt.AlignmentFlag.AlignRight)
+
+    def set_backups(self, paths: list[str]) -> None:
+        self.backup_list.clear()
+        for path in paths:
+            self.backup_list.addItem(path)
+
+    def _restore_selected_backup(self) -> None:
+        item = self.backup_list.currentItem()
+        if item:
+            self.backup_restore_requested.emit(item.text())
 
     def _save(self) -> None:
         sensors: dict[str, dict[str, Any]] = {}
@@ -1563,6 +1563,8 @@ class SettingsPage(QWidget):
                     "diretorio_exportacao": self.export_path.text().strip(),
                     "separador_csv": self.separator.currentText(),
                     "backup_automatico": self.backup.isChecked(),
+                    "sinal_sonoro_alarme": self.sound.isChecked(),
+                    "diretorio_backups": self.backup_path.text().strip(),
                 },
                 "calculos": self.config.get("calculos", {}),
             }

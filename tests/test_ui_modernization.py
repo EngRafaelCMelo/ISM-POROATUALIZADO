@@ -74,20 +74,13 @@ def test_overview_uses_compact_collapsible_sections(tmp_path) -> None:
     window.close()
 
 
-def test_synoptic_layout_editor_saves_and_restores_user_positions(tmp_path) -> None:
+def test_synoptic_layout_is_fixed_and_not_persisted(tmp_path) -> None:
     window = build_window(tmp_path)
     holder = window.overview.synoptic.equipment_items["sample"]
-    holder.moveBy(18, -8)
-
-    window.overview.layout_edit_button.setChecked(True)
-    window.overview.layout_edit_button.setChecked(False)
-    stored = window.config.get("interface.sinotico_layout")
-    assert stored["items"]["equipment.sample"] == {"x": 454.5, "y": 307.8}
-
-    window.overview.layout_reset_button.click()
-    assert window.config.get("interface.sinotico_layout") == {}
     assert holder.pos().x() == 436.5
     assert holder.pos().y() == 315.8
+    assert not hasattr(window.overview.synoptic, "layout_items")
+    assert "sinotico_layout" not in window.config.data.get("interface", {})
     window.close()
 
 

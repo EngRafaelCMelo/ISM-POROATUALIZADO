@@ -93,14 +93,16 @@
   "interface": {
     "tema": "claro",
     "fonte": 10,
-    "janela_grafico_s": 60,
-    "sinotico_layout": {}
+    "janela_grafico_s": 60
   },
   "dados": {
     "banco": "",
     "diretorio_exportacao": "",
     "separador_csv": ";",
     "backup_automatico": true,
+    "diretorio_backups": "",
+    "sinal_sonoro_alarme": true,
+    "sinal_sonoro_cooldown_s": 5.0,
     "retencao_backups": 10,
     "retencao_logs_dias": 30
   }
